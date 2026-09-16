@@ -1,0 +1,24 @@
+# ==== IDE ====
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# ==== 构建产物 ====
+target/
+*.class
+
+# ==== 本地真实配置（只进 application-example.yml 模板与 .env.example） ====
+backend/howtocook-app/src/main/resources/application.yml
+backend/howtocook-mcp-server/src/main/resources/application.yml
+backend/docker/.env
+
+# ==== 日志 ====
+logs/
+*.log
+
+# ==== 系统 ====
+.DS_Store
+Thumbs.db

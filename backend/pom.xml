@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>3.5.16</version>
+		<relativePath/> <!-- lookup parent from repository -->
+	</parent>
+	<groupId>com.anfioo</groupId>
+	<artifactId>howtocook</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<packaging>pom</packaging>
+	<name>howtocook</name>
+	<description>今天吃什么 · Agentic RAG 个人饮食助手（后端父工程）</description>
+
+	<modules>
+		<module>howtocook-common</module>
+		<module>howtocook-app</module>
+		<module>howtocook-mcp-server</module>
+	</modules>
+
+	<properties>
+		<java.version>17</java.version>
+		<!-- ===== 版本基线（最终采用值已在进度记录台账登记） ===== -->
+		<spring-ai.version>1.1.8</spring-ai.version>
+		<sa-token.version>1.46.0</sa-token.version>
+		<mybatis-plus.version>3.5.17</mybatis-plus.version>
+		<pgvector.version>0.1.6</pgvector.version>
+		<rocketmq-spring.version>2.3.6</rocketmq-spring.version>
+		<commonmark.version>0.24.0</commonmark.version>
+		<aws-sdk.version>2.54.19</aws-sdk.version>
+	</properties>
+
+	<dependencyManagement>
+		<dependencies>
+			<!-- Spring AI 全家（ChatClient / EmbeddingModel / MCP） -->
+			<dependency>
+				<groupId>org.springframework.ai</groupId>
+				<artifactId>spring-ai-bom</artifactId>
+				<version>${spring-ai.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<!-- AWS SDK v2（S3，连 RustFS） -->
+			<dependency>
+				<groupId>software.amazon.awssdk</groupId>
+				<artifactId>bom</artifactId>
+				<version>${aws-sdk.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<!-- Sa-Token：认证 + RBAC -->
+			<dependency>
+				<groupId>cn.dev33</groupId>
+				<artifactId>sa-token-spring-boot3-starter</artifactId>
+				<version>${sa-token.version}</version>
+			</dependency>
+			<!-- Sa-Token 会话存 Redis -->
+			<dependency>
+				<groupId>cn.dev33</groupId>
+				<artifactId>sa-token-redis-jackson</artifactId>
+				<version>${sa-token.version}</version>
+			</dependency>
+			<!-- MyBatis-Plus -->
+			<dependency>
+				<groupId>com.baomidou</groupId>
+				<artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+				<version>${mybatis-plus.version}</version>
+			</dependency>
+			<!-- pgvector Java 客户端 -->
+			<dependency>
+				<groupId>com.pgvector</groupId>
+				<artifactId>pgvector</artifactId>
+				<version>${pgvector.version}</version>
+			</dependency>
+			<!-- RocketMQ -->
+			<dependency>
+				<groupId>org.apache.rocketmq</groupId>
+				<artifactId>rocketmq-spring-boot-starter</artifactId>
+				<version>${rocketmq-spring.version}</version>
+			</dependency>
+			<!-- Markdown AST 解析 -->
+			<dependency>
+				<groupId>org.commonmark</groupId>
+				<artifactId>commonmark</artifactId>
+				<version>${commonmark.version}</version>
+			</dependency>
+			<!-- 内部模块 -->
+			<dependency>
+				<groupId>com.anfioo</groupId>
+				<artifactId>howtocook-common</artifactId>
+				<version>${project.version}</version>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+</project>
