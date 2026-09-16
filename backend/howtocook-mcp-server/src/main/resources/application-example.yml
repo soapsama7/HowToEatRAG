@@ -1,0 +1,6 @@
+# MCP Tool Server 配置模板（进 git）
+# 复制为 application.yml 后填真实值（application.yml 已 gitignore）
+# 具体配置项在 Step 3.2 敲定
+spring:
+  application:
+    name: howtocook-mcp-server   # 应用名
