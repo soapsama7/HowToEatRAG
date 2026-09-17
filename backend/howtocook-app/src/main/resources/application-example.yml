@@ -55,6 +55,12 @@ spring:
         completions-path: /chat/completions   # OpenAI 兼容对话路径（固定）
         temperature:                   # 采样温度
 
+# RocketMQ（Step 2.3；compose 已将 namesrv 映射到 127.0.0.1:9876）
+rocketmq:
+  name-server:                        # namesrv 地址，如 localhost:9876
+  producer:
+    group: howtocook-doc-producer     # 生产者组（固定）
+
 # Spring AI MCP 客户端（Step 3.3 补连接配置：指向 mcp-tool-server + 注入内部 Token）
 # spring.ai.mcp.client:
 #   ...
