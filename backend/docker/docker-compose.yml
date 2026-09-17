@@ -1,0 +1,175 @@
+# =====================================================================
+# 今天吃什么 · 本地基础设施（Docker Compose）
+#
+# 用法：
+#   cp .env.example .env      # 填入真实值（.env 已 gitignore）
+#   docker compose up -d
+#   docker compose ps         # 全部 healthy
+#
+# 端口约定（宿主机仅暴露 4 个）：
+#   5432 postgres / 9000+9001 rustfs / 6379 redis
+#   RocketMQ 不映射宿主机端口（仅 docker 内网）
+#   MCP Tool Server 同样不映射（Step 3.2 启用，见文件末尾注释）
+# =====================================================================
+name: howtocook
+
+services:
+
+  # ---------------- PostgreSQL（pgvector + zhparser 中文分词） ----------------
+  postgres:
+    build:
+      context: ./postgres
+    image: howtocook-postgres:pg17-zhparser
+    container_name: howtocook-postgres
+    environment:
+      POSTGRES_DB: ${PG_DATABASE:-howtocook}
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?请在 .env 中设置 PG_PASSWORD}
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # 首次初始化执行：建扩展 + zh_cn 检索配置（数据卷非空时不重复执行）
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # ---------------- Redis（Sa-Token 会话 / 对话限流计数） ----------------
+  redis:
+    image: redis:7
+    container_name: howtocook-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------------- RustFS（S3 兼容对象存储，存原始 markdown） ----------------
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: howtocook-rustfs
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?请在 .env 中设置 RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?请在 .env 中设置 RUSTFS_SECRET_KEY}
+      RUSTFS_VOLUMES: /data
+      TZ: Asia/Shanghai
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # 控制台
+    volumes:
+      - rustfs-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  # ---------------- RocketMQ（文档入库异步索引消息） ----------------
+  rocketmq-namesrv:
+    image: apache/rocketmq:5.3.2
+    container_name: howtocook-rocketmq-namesrv
+    command: sh mqnamesrv
+    # 说明：命名卷由 Docker 以 root 创建，而镜像默认以非 root 用户（rocketmq）运行，
+    #      会导致 /home/rocketmq/logs、store 不可写（broker 启动失败）。本地开发以 root 运行规避，
+    #      生产/服务器部署应改为预先 chown 卷目录。
+    user: root
+    environment:
+      JAVA_OPT_EXT: "-Xms256m -Xmx256m -Xmn128m"
+      TZ: Asia/Shanghai
+    volumes:
+      - rocketmq-namesrv-logs:/home/rocketmq/logs
+    # 不映射宿主机端口：仅 docker 内网 9876
+    expose:
+      - "9876"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/9876' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  rocketmq-broker:
+    image: apache/rocketmq:5.3.2
+    container_name: howtocook-rocketmq-broker
+    command: sh mqbroker -c /home/rocketmq/broker.conf
+    # 同 namesrv：本地开发以 root 运行，规避命名卷属主导致的 store/logs 不可写
+    user: root
+    environment:
+      NAMESRV_ADDR: rocketmq-namesrv:9876
+      JAVA_OPT_EXT: "-Xms512m -Xmx512m -Xmn256m"
+      TZ: Asia/Shanghai
+    depends_on:
+      rocketmq-namesrv:
+        condition: service_healthy
+    volumes:
+      - ./rocketmq/broker.conf:/home/rocketmq/broker.conf:ro
+      - rocketmq-broker-logs:/home/rocketmq/logs
+      - rocketmq-broker-store:/home/rocketmq/store
+    # 不映射宿主机端口：仅 docker 内网 10911 / 10909
+    expose:
+      - "10911"
+      - "10909"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/10911' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    restart: unless-stopped
+
+  # =====================================================================
+  # MCP Tool Server（Step 3.2 启用；安全要求：不映射宿主机端口，仅 docker 内网）
+  # 启用时取消注释，并按 Step 3.2 的实现补齐环境变量（PG / RUSTFS / MCP_INTERNAL_TOKEN）
+  # =====================================================================
+  # mcp-tool-server:
+  #   build:
+  #     context: ../howtocook-mcp-server
+  #   image: howtocook-mcp-server:latest
+  #   container_name: howtocook-mcp-server
+  #   environment:
+  #     PG_HOST: postgres
+  #     PG_DATABASE: ${PG_DATABASE:-howtocook}
+  #     PG_USER: ${PG_USER:-postgres}
+  #     PG_PASSWORD: ${PG_PASSWORD}
+  #     RUSTFS_ENDPOINT: http://rustfs:9000
+  #     RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+  #     RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+  #     RUSTFS_BUCKET: ${RUSTFS_BUCKET:-howtocook}
+  #     MCP_INTERNAL_TOKEN: ${MCP_INTERNAL_TOKEN}
+  #   expose:
+  #     - "8081"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     rustfs:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8081/actuator/health || exit 1"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 10
+  #     start_period: 40s
+  #   restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  rustfs-data:
+  rocketmq-namesrv-logs:
+  rocketmq-broker-logs:
+  rocketmq-broker-store:
