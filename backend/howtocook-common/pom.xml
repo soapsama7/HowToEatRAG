@@ -18,6 +18,11 @@
 			<groupId>com.baomidou</groupId>
 			<artifactId>mybatis-plus-spring-boot3-starter</artifactId>
 		</dependency>
+		<!-- JSON：公共 Jackson 配置（含 jackson-datatype-jsr310，LocalDateTime 序列化） -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-json</artifactId>
+		</dependency>
 		<!-- Redis（公共 Redis 配置与 RedisTemplate 在本模块） -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
