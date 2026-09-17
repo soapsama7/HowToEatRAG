@@ -1,0 +1,12 @@
+﻿docker : unable to get image 'redis:7': failed to connect to the docker API at 
+npipe:////./pipe/dockerDesktopLinuxEngine; check if the path is correct and if 
+the daemon is running: open //./pipe/dockerDesktopLinuxEngine: The system canno
+t find the file specified.
+所在位置 行:445 字符: 57
++ ... Java\HowToCook\backend\docker; $r = docker compose up -d 2>&1 | Out-S ...
++                                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (unable to get i...file specified. 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+

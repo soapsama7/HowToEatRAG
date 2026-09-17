@@ -18,6 +18,11 @@
 			<groupId>com.baomidou</groupId>
 			<artifactId>mybatis-plus-spring-boot3-starter</artifactId>
 		</dependency>
+		<!-- MyBatis-Plus 分页插件（3.5.9+ 独立工件） -->
+		<dependency>
+			<groupId>com.baomidou</groupId>
+			<artifactId>mybatis-plus-jsqlparser</artifactId>
+		</dependency>
 		<!-- JSON：公共 Jackson 配置（含 jackson-datatype-jsr310，LocalDateTime 序列化） -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
