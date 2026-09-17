@@ -32,6 +32,11 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
+		<!-- AOP：审计日志切面 -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-aop</artifactId>
+		</dependency>
 
 		<!-- Sa-Token：认证 + RBAC；会话存 Redis -->
 		<dependency>
@@ -73,6 +78,11 @@
 		<dependency>
 			<groupId>org.springframework.ai</groupId>
 			<artifactId>spring-ai-starter-mcp-client</artifactId>
+		</dependency>
+		<!-- Spring AI OpenAI 兼容模型（Step 2.5 embedding / Step 4.2 chat；chat 与 embedding 分 Key 分 base-url） -->
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-starter-model-openai</artifactId>
 		</dependency>
 
 		<!-- Lombok -->
