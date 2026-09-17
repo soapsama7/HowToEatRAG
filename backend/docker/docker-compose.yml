@@ -92,7 +92,9 @@ services:
       TZ: Asia/Shanghai
     volumes:
       - rocketmq-namesrv-logs:/home/rocketmq/logs
-    # 不映射宿主机端口：仅 docker 内网 9876
+    # 映射到 127.0.0.1：主应用在宿主机（IDEA）运行需连 namesrv；仅回环，不暴露局域网
+    ports:
+      - "127.0.0.1:9876:9876"
     expose:
       - "9876"
     healthcheck:
@@ -120,7 +122,10 @@ services:
       - ./rocketmq/broker.conf:/home/rocketmq/broker.conf:ro
       - rocketmq-broker-logs:/home/rocketmq/logs
       - rocketmq-broker-store:/home/rocketmq/store
-    # 不映射宿主机端口：仅 docker 内网 10911 / 10909
+    # 映射到 127.0.0.1：宿主机主应用需与 broker 通信（brokerIP1=127.0.0.1，见 broker.conf）；仅回环
+    ports:
+      - "127.0.0.1:10911:10911"
+      - "127.0.0.1:10909:10909"
     expose:
       - "10911"
       - "10909"
