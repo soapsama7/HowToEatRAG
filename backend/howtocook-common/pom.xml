@@ -28,6 +28,11 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-json</artifactId>
 		</dependency>
+		<!-- Spring AI 模型接口：EmbeddingClient（批量向量化） -->
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-model</artifactId>
+		</dependency>
 		<!-- Redis（公共 Redis 配置与 RedisTemplate 在本模块） -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -47,6 +52,12 @@
 		<dependency>
 			<groupId>org.commonmark</groupId>
 			<artifactId>commonmark</artifactId>
+		</dependency>
+		<!-- 单测（解析器/分块器为纯函数，直接单测真实菜谱文件） -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
 		</dependency>
 		<!-- Lombok -->
 		<dependency>
