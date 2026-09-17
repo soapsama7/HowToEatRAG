@@ -15,19 +15,31 @@ spring:
   application:
     name:                              # 应用名
   datasource:
-    url:                               # PostgreSQL JDBC URL
+    url:                               # PostgreSQL JDBC URL，如 jdbc:postgresql://localhost:5432/howtocook
     username:                          # DB 用户名（建议 ${PG_USER}）
     password:                          # DB 密码（走环境变量 ${PG_PASSWORD}）
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size:               # 连接池上限
+      minimum-idle:                    # 最小空闲连接
+      connection-timeout:              # 获取连接超时（毫秒）
   flyway:
     enabled: true                      # 启用 Flyway
     locations: classpath:db/migration  # 迁移脚本目录（固定）
+    baseline-on-migrate: true          # 已有库首次纳入管理时自动 baseline
   data:
     redis:
       host:                            # Redis 主机（建议 ${REDIS_HOST}）
       port:                            # Redis 端口
+      database: 0                      # Redis 库序号
   servlet:
     multipart:
       max-file-size:                   # 上传体积上限（仅限小体积 markdown）
+      max-request-size:                # 单请求体积上限
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss   # java.util.Date 格式（LocalDateTime 由 common/JacksonConfig 注册）
+    time-zone: GMT+8
+    default-property-inclusion: non_null
   ai:
     openai:
       base-url:                        # chat 服务 base-url
@@ -41,9 +53,18 @@ spring:
         completions-path: /chat/completions   # OpenAI 兼容对话路径（固定）
         temperature:                   # 采样温度
 
+# Spring AI MCP 客户端（Step 3.3 补连接配置：指向 mcp-tool-server + 注入内部 Token）
+# spring.ai.mcp.client:
+#   ...
+
 sa-token:                              # 具体项 Step 1.2 敲定
   token-name: Authorization            # Token 请求头名（固定）
   timeout:                             # Token 有效期（秒）
+  active-timeout: -1                   # 活跃超时，-1 表示不限制
+  is-concurrent: true                  # 是否允许多端登录
+  is-share: true                       # 多端是否共用同一 Token
+  token-style: uuid                    # Token 风格
+  is-log: false
 
 howtocook:
   storage:                             # RustFS（S3 兼容）
@@ -62,3 +83,12 @@ howtocook:
     memory-window:                     # ChatMemory 携带最近消息条数
   security:
     internal-token:                    # 环境变量 ${MCP_INTERNAL_TOKEN}，调 MCP Server 的预共享 Token
+
+management:                            # 运维端点：仅放开 health
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never              # 不向前端暴露组件明细
