@@ -1,5 +1,7 @@
 package com.anfioo.howtocook.app.exception;
 
+import cn.dev33.satoken.exception.NotLoginException;
+import cn.dev33.satoken.exception.NotRoleException;
 import com.anfioo.howtocook.common.result.BusinessException;
 import com.anfioo.howtocook.common.result.ErrorCode;
 import com.anfioo.howtocook.common.result.Result;
@@ -94,6 +96,22 @@ public class GlobalExceptionHandler {
         log.warn("资源不存在: {}", e.getResourcePath());
         return ResponseEntity.status(ErrorCode.NOT_FOUND.getHttpStatus())
                 .body(Result.fail(ErrorCode.NOT_FOUND));
+    }
+
+    /** ② 未登录 / Token 无效或过期（Sa-Token 拦截器抛出） */
+    @ExceptionHandler(NotLoginException.class)
+    public ResponseEntity<Result<Void>> handleNotLogin(NotLoginException e) {
+        log.warn("未登录访问: type={}", e.getType());
+        return ResponseEntity.status(ErrorCode.UNAUTHORIZED.getHttpStatus())
+                .body(Result.fail(ErrorCode.UNAUTHORIZED));
+    }
+
+    /** ② 已登录但角色不足（如 USER 访问 /api/admin/**） */
+    @ExceptionHandler(NotRoleException.class)
+    public ResponseEntity<Result<Void>> handleNotRole(NotRoleException e) {
+        log.warn("角色不足: missingRole={}", e.getRole());
+        return ResponseEntity.status(ErrorCode.FORBIDDEN.getHttpStatus())
+                .body(Result.fail(ErrorCode.FORBIDDEN));
     }
 
     /** ③ 兜底异常：未预期异常，记录完整堆栈但不向前端暴露细节 */

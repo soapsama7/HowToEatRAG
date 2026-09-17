@@ -81,6 +81,12 @@
 				<artifactId>pgvector</artifactId>
 				<version>${pgvector.version}</version>
 			</dependency>
+			<!-- Spring AI 模型接口（common 的 EmbeddingClient 编译需要） -->
+			<dependency>
+				<groupId>org.springframework.ai</groupId>
+				<artifactId>spring-ai-model</artifactId>
+				<version>${spring-ai.version}</version>
+			</dependency>
 			<!-- RocketMQ -->
 			<dependency>
 				<groupId>org.apache.rocketmq</groupId>
