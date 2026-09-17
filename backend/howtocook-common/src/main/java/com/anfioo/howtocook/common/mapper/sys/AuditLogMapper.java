@@ -1,0 +1,12 @@
+package com.anfioo.howtocook.common.mapper.sys;
+
+import com.anfioo.howtocook.common.entity.sys.AuditLog;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Mapper;
+
+/**
+ * AuditLog Mapper（MyBatis-Plus 通用 CRUD）。
+ */
+@Mapper
+public interface AuditLogMapper extends BaseMapper<AuditLog> {
+}

@@ -1,4 +1,4 @@
-package com.anfioo.howtocook.common.enums;
+package com.anfioo.howtocook.common.enums.doc;
 
 import lombok.Getter;
 
