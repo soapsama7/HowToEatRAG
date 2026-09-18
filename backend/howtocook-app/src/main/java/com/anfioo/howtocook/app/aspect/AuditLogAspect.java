@@ -2,6 +2,7 @@ package com.anfioo.howtocook.app.aspect;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.anfioo.howtocook.app.service.AuditLogService;
+import com.anfioo.howtocook.common.entity.sys.AuditLog;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,7 +16,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import java.util.Arrays;
 
 /**
- * 审计日志切面：环绕拦截标注 {@link AuditLog} 的方法，采集
+ * 审计日志切面：环绕拦截标注 {@link AuditOperation} 的方法，采集
  * 用户 / 方法路径 / 入参摘要（截断 500 字符 + 脱敏）/ 结果 / 耗时 / IP，异步入库。
  * <p>业务异常照常向上抛出，仅影响审计记录的 result 字段（FAIL）。</p>
  */
@@ -27,15 +28,15 @@ public class AuditLogAspect {
 
     private final AuditLogService auditLogService;
 
-    @Around(value = "@annotation(auditLog)", argNames = "joinPoint,auditLog")
-    public Object around(ProceedingJoinPoint joinPoint, AuditLog auditLog) throws Throwable {
+    @Around(value = "@annotation(auditOperation)", argNames = "joinPoint,auditOperation")
+    public Object around(ProceedingJoinPoint joinPoint, AuditOperation auditOperation) throws Throwable {
         long start = System.currentTimeMillis();
         try {
             Object result = joinPoint.proceed();
-            record(auditLog.operation(), joinPoint, "SUCCESS", System.currentTimeMillis() - start);
+            record(auditOperation.operation(), joinPoint, "SUCCESS", System.currentTimeMillis() - start);
             return result;
         } catch (Throwable e) {
-            record(auditLog.operation(), joinPoint, "FAIL", System.currentTimeMillis() - start);
+            record(auditOperation.operation(), joinPoint, "FAIL", System.currentTimeMillis() - start);
             throw e;
         }
     }
@@ -44,8 +45,7 @@ public class AuditLogAspect {
         try {
             HttpServletRequest request = currentRequest();
 
-            com.anfioo.howtocook.common.entity.sys.AuditLog auditLog =
-                    new com.anfioo.howtocook.common.entity.sys.AuditLog();
+            AuditLog auditLog = new AuditLog();
             auditLog.setOperation(operation);
             auditLog.setMethod(request == null ? null
                     : request.getMethod() + " " + request.getRequestURI());
@@ -64,7 +64,7 @@ public class AuditLogAspect {
     }
 
     /** 填充操作用户（未登录场景 userId/username 为空）；username 优先取登录会话 */
-    private void fillUser(com.anfioo.howtocook.common.entity.sys.AuditLog auditLog) {
+    private void fillUser(AuditLog auditLog) {
         try {
             long userId = StpUtil.getLoginIdAsLong();
             auditLog.setUserId(userId);

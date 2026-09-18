@@ -10,7 +10,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 审计日志表，对应 {@code audit_log}（由 @AuditLog 切面异步入库，Step 1.3）。
+ * 审计日志表，对应 {@code audit_log}（由 @AuditOperation 切面异步入库，Step 1.3）。
  */
 @Data
 @TableName("audit_log")

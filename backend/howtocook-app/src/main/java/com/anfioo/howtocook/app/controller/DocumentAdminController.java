@@ -1,6 +1,6 @@
 package com.anfioo.howtocook.app.controller;
 
-import com.anfioo.howtocook.app.aspect.AuditLog;
+import com.anfioo.howtocook.app.aspect.AuditOperation;
 import com.anfioo.howtocook.app.dto.DocumentDetailResponse;
 import com.anfioo.howtocook.app.dto.DocumentUploadResponse;
 import com.anfioo.howtocook.app.service.DocumentAdminService;
@@ -29,7 +29,7 @@ public class DocumentAdminController {
     private final DocumentAdminService documentAdminService;
 
     /** 上传 markdown（仅 .md、≤2MB），立即返回 docId + taskNo */
-    @AuditLog(operation = "UPLOAD_DOCUMENT")
+    @AuditOperation(operation = "UPLOAD_DOCUMENT")
     @PostMapping
     public Result<DocumentUploadResponse> upload(@RequestParam("file") MultipartFile file,
                                                  @RequestParam(value = "docType", required = false) String docType,
@@ -52,7 +52,7 @@ public class DocumentAdminController {
     }
 
     /** 删除（逻辑删 + 物理删 chunk） */
-    @AuditLog(operation = "DELETE_DOCUMENT")
+    @AuditOperation(operation = "DELETE_DOCUMENT")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable long id) {
         documentAdminService.delete(id);
@@ -60,14 +60,14 @@ public class DocumentAdminController {
     }
 
     /** 重索引：version+1，重新走索引链路 */
-    @AuditLog(operation = "REINDEX_DOCUMENT")
+    @AuditOperation(operation = "REINDEX_DOCUMENT")
     @PostMapping("/{id}/reindex")
     public Result<String> reindex(@PathVariable long id) {
         return Result.ok(documentAdminService.reindex(id));
     }
 
     /** 批量导入（本地开发）：body 传本机目录，遍历 dishes/**（排除 template）与 tips/** */
-    @AuditLog(operation = "BATCH_IMPORT_DOCUMENTS")
+    @AuditOperation(operation = "BATCH_IMPORT_DOCUMENTS")
     @PostMapping("/batch-import")
     public Result<com.anfioo.howtocook.app.dto.BatchImportResponse> batchImport(
             @RequestBody com.anfioo.howtocook.app.dto.BatchImportRequest request) {
