@@ -7,6 +7,7 @@ import com.anfioo.howtocook.app.dto.ConversationResponse;
 import com.anfioo.howtocook.app.dto.MessageResponse;
 import com.anfioo.howtocook.app.agent.AgentService;
 import com.anfioo.howtocook.app.service.ConversationService;
+import com.anfioo.howtocook.app.service.RateLimitService;
 import com.anfioo.howtocook.common.entity.chat.Conversation;
 import com.anfioo.howtocook.common.result.Result;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -45,6 +46,7 @@ public class ConversationController {
 
     private final ConversationService conversationService;
     private final AgentService agentService;
+    private final RateLimitService rateLimitService;
 
     /** SSE 心跳线程（每 15s 一条注释帧，防止代理/网关空闲断连） */
     private final ScheduledExecutorService heartbeatExecutor =
@@ -84,16 +86,18 @@ public class ConversationController {
         return Result.ok();
     }
 
-    /** SSE 对话（§5.6 事件契约） */
+    /** SSE 对话（§5.6 事件契约；入口限流：频次 + 并发，超限 429 统一错误体） */
     @PostMapping(value = "/api/conversations/{id}/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chat(@PathVariable long id, @Valid @RequestBody ChatRequest request) {
         long userId = StpUtil.getLoginIdAsLong();
+        rateLimitService.acquireChatSlot(userId); // 频次 + 并发闸门（超限 429）
         SseEmitter emitter = new SseEmitter(300_000L);
         AtomicBoolean disconnected = new AtomicBoolean(false);
 
         emitter.onTimeout(() -> disconnected.set(true));
         emitter.onError(t -> disconnected.set(true));
-        emitter.onCompletion(() -> { });
+        // 会话槽位随 SSE 终结（complete/error/timeout）统一释放
+        emitter.onCompletion(() -> rateLimitService.releaseSlot(userId));
 
         // 心跳：注释帧不计入事件流
         ScheduledFuture<?> heartbeat = heartbeatExecutor.scheduleAtFixedRate(() -> {
