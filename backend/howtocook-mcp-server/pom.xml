@@ -25,6 +25,18 @@
 			<artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
 		</dependency>
 
+		<!-- Spring AI OpenAI 协议客户端：search_chunks 检索前需将 query 向量化（EmbeddingModel） -->
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-starter-model-openai</artifactId>
+		</dependency>
+
+		<!-- Actuator：健康检查（compose healthcheck 与鉴权白名单使用） -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+
 		<!-- PostgreSQL 驱动（检索直连 PG） -->
 		<dependency>
 			<groupId>org.postgresql</groupId>
