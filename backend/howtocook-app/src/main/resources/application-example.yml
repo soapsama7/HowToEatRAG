@@ -54,6 +54,19 @@ spring:
         model:                         # 对话模型名
         completions-path: /chat/completions   # OpenAI 兼容对话路径（固定）
         temperature:                   # 采样温度
+    mcp:
+      client:                          # MCP 客户端（Step 3.3；连接失败不 fail-fast）
+        enabled: true
+        name: howtocook-app
+        type: SYNC
+        initialized: false             # 关闭启动期急切初始化，由 app/service/McpClientSupport 容错初始化
+        toolcallback:
+          enabled: true                # MCP 工具注册为 ToolCallback（Step 4.2 ChatClient 使用）
+        sse:
+          connections:
+            mcp-tool-server:
+              url:                     # mcp-tool-server 地址，如 http://localhost:18081
+              sse-endpoint: /sse
 
 # RocketMQ（Step 2.3；compose 已将 namesrv 映射到 127.0.0.1:9876）
 rocketmq:
@@ -61,9 +74,8 @@ rocketmq:
   producer:
     group: howtocook-doc-producer     # 生产者组（固定）
 
-# Spring AI MCP 客户端（Step 3.3 补连接配置：指向 mcp-tool-server + 注入内部 Token）
-# spring.ai.mcp.client:
-#   ...
+# Spring AI MCP 客户端连接配置见上方 spring.ai.mcp.client（Step 3.3）；
+# X-Internal-Token 请求头由 app/config/McpClientConfig 的请求定制器统一注入。
 
 sa-token:                              # 具体项 Step 1.2 敲定
   token-name: Authorization            # Token 请求头名（固定）
