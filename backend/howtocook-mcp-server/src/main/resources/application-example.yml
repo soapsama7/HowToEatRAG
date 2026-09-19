@@ -1,6 +1,67 @@
+# =====================================================================
 # MCP Tool Server 配置模板（进 git）
 # 复制为 application.yml 后填真实值（application.yml 已 gitignore）
-# 具体配置项在 Step 3.2 敲定
+# 密钥类一律走环境变量，与主应用共用：PG_PASSWORD / RUSTFS_* / MCP_INTERNAL_TOKEN /
+#   LLM_EMBEDDING_API_KEY（search_chunks 需向量化 query）
+# =====================================================================
+server:
+  port:                              # MCP Server 端口（部署用 18082）
+
 spring:
   application:
-    name: howtocook-mcp-server   # 应用名
+    name: howtocook-mcp-server
+  datasource:
+    url:                             # PostgreSQL JDBC URL（${PG_HOST}/${PG_PORT}/${PG_DATABASE}）
+    username:                        # DB 用户名（建议 ${PG_USER}）
+    password:                        # DB 密码（环境变量 ${PG_PASSWORD}）
+    hikari:
+      initialization-fail-timeout: 1 # 连不上 DB 启动即失败（Step 3.2 fail-fast 要求）
+  ai:
+    model:                           # MCP Server 只用 embedding，其余模态显式禁用
+      chat: none                     #   （starter-model-openai 默认装配全部模态，
+      image: none                    #    缺 chat key 会启动失败：OpenAI API key must be set）
+      audio:
+        speech: none
+        transcription: none
+      moderation: none
+    openai:
+      base-url:                      # chat 服务 base-url（已禁用 chat，仅占位）
+      api-key:                       # 已禁用 chat 等模态，不要求真实 key，仅满足连接属性校验
+      embedding:
+        model:                       # 向量模型名（${EMBEDDING_MODEL}）
+        options:
+          model:                     # 实际请求体中的 model（必配）
+        api-key:                     # 环境变量 ${LLM_EMBEDDING_API_KEY}
+        base-url:                    # 向量服务 base-url（${EMBEDDING_BASE_URL}）
+        embeddings-path: /embeddings # 固定（防 /v1 拼接成 /v1/v1，见 Step 2.5 踩坑）
+    mcp:
+      server:
+        name: howtocook-mcp-server   # MCP Server 名
+        version: 0.0.1               # 版本
+        protocol: sse                # SSE 传输（/sse + /mcp/message）
+
+howtocook:
+  retrieval:                         # 与主应用一致（融合公式见开发文档 §5.3）
+    vector-weight: 0.7
+    keyword-weight: 0.3
+    top-k: 5
+    recall-size: 20
+  storage:                           # RustFS（S3 兼容）
+    endpoint:                        # 环境变量 ${RUSTFS_ENDPOINT}
+    access-key:                      # 环境变量 ${RUSTFS_ACCESS_KEY}
+    secret-key:                      # 环境变量 ${RUSTFS_SECRET_KEY}
+    bucket:                          # 桶名
+  security:
+    internal-token:                  # 环境变量 ${MCP_INTERNAL_TOKEN}，X-Internal-Token 预共享 Token
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health              # 仅放开 health（鉴权白名单 + compose healthcheck）
+  health:
+    redis:
+      enabled: false                 # MCP Server 不使用 Redis，关闭其健康指示器
+
+mybatis-plus:
+  type-handlers-package: com.anfioo.howtocook.common.typehandler

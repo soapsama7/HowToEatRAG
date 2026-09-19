@@ -8,8 +8,8 @@
 #
 # 端口约定（宿主机仅暴露 4 个）：
 #   5432 postgres / 9000+9001 rustfs / 6379 redis
-#   RocketMQ 不映射宿主机端口（仅 docker 内网）
-#   MCP Tool Server 同样不映射（Step 3.2 启用，见文件末尾注释）
+#   RocketMQ 不映射局域网（仅 127.0.0.1，供宿主主应用联调）
+#   MCP Tool Server 映射 127.0.0.1:18081（同策略，见 mcp-tool-server 服务注释）
 # =====================================================================
 name: howtocook
 
@@ -138,38 +138,47 @@ services:
     restart: unless-stopped
 
   # =====================================================================
-  # MCP Tool Server（Step 3.2 启用；安全要求：不映射宿主机端口，仅 docker 内网）
-  # 启用时取消注释，并按 Step 3.2 的实现补齐环境变量（PG / RUSTFS / MCP_INTERNAL_TOKEN）
+  # MCP Tool Server（Step 3.2 启用）
+  # 安全形态：部署目标为仅 docker 内网可达（不映射公网/局域网端口）；
+  # 本地开发联调映射 127.0.0.1:18081（用户决策 2026-09-18，与 RocketMQ 同策略，仅回环）
+  # 构建前置：宿主机先 mvn -pl howtocook-mcp-server -am package
   # =====================================================================
-  # mcp-tool-server:
-  #   build:
-  #     context: ../howtocook-mcp-server
-  #   image: howtocook-mcp-server:latest
-  #   container_name: howtocook-mcp-server
-  #   environment:
-  #     PG_HOST: postgres
-  #     PG_DATABASE: ${PG_DATABASE:-howtocook}
-  #     PG_USER: ${PG_USER:-postgres}
-  #     PG_PASSWORD: ${PG_PASSWORD}
-  #     RUSTFS_ENDPOINT: http://rustfs:9000
-  #     RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
-  #     RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
-  #     RUSTFS_BUCKET: ${RUSTFS_BUCKET:-howtocook}
-  #     MCP_INTERNAL_TOKEN: ${MCP_INTERNAL_TOKEN}
-  #   expose:
-  #     - "8081"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     rustfs:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8081/actuator/health || exit 1"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 10
-  #     start_period: 40s
-  #   restart: unless-stopped
+  mcp-tool-server:
+    build:
+      context: ..
+      dockerfile: docker/mcp/Dockerfile
+    image: howtocook-mcp-server:latest
+    container_name: howtocook-mcp-server
+    environment:
+      PG_HOST: postgres
+      PG_DATABASE: ${PG_DATABASE:-howtocook}
+      PG_USER: ${PG_USER:-postgres}
+      PG_PASSWORD: ${PG_PASSWORD}
+      RUSTFS_ENDPOINT: http://rustfs:9000
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      RUSTFS_BUCKET: ${RUSTFS_BUCKET:-howtocook}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-qwen3.7-text-embedding}
+      LLM_EMBEDDING_API_KEY: ${LLM_EMBEDDING_API_KEY}
+      MCP_INTERNAL_TOKEN: ${MCP_INTERNAL_TOKEN}
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:18081:18082"   # 仅回环，供宿主机主应用（MCP Client）联调
+    expose:
+      - "18082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:18082/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    restart: unless-stopped
 
 volumes:
   postgres-data:
