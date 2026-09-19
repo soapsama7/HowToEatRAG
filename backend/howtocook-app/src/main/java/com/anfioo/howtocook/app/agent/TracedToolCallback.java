@@ -65,9 +65,16 @@ public class TracedToolCallback implements ToolCallback {
         int round = context.getToolCallCount().incrementAndGet();
         int step = context.getStep().incrementAndGet();
 
+        // TOOL_START 实时事件（SSE）
+        Map<String, Object> startEvent = new LinkedHashMap<>();
+        startEvent.put("step", step);
+        startEvent.put("tool", toolName);
+        startEvent.put("event", "TOOL_START");
+        context.record(startEvent);
+
         if (round > 5) {
             String forced = "（工具调用轮数已达上限，请基于以上信息直接回答用户）";
-            recordTrace(step, toolName, "CALL", 0, false, forced);
+            recordTrace(step, toolName, "TOOL_RESULT", 0, false, forced);
             return forced;
         }
 
@@ -179,7 +186,7 @@ public class TracedToolCallback implements ToolCallback {
         entry.put("elapsedMs", elapsedMs);
         entry.put("ok", ok);
         entry.put("summary", summary);
-        context.getTrace().add(entry);
+        context.record(entry);
     }
 
     private String summarize(String output) {
