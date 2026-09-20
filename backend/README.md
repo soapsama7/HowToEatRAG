@@ -63,8 +63,10 @@ docker compose up -d mcp-tool-server
 
 ```bash
 cd backend
-java -jar howtocook-app/target/howtocook-app-0.0.1-SNAPSHOT.jar --server.port=18080
-# 健康检查：GET http://localhost:18080/actuator/health → UP
+java -jar howtocook-app/target/howtocook-app-0.0.1-SNAPSHOT.jar
+# 默认端口 8080；健康检查：GET http://localhost:8080/actuator/health → UP
+# 前端 vite 代理默认指向 http://localhost:8080（可用环境变量 VITE_API_TARGET 覆盖，
+# 修改 frontend/vite.config.js 后需重启 npm run dev）
 ```
 
 ### 6. 批量导入菜谱知识库（管理端）
