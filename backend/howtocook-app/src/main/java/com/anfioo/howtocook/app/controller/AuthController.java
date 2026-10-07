@@ -1,5 +1,6 @@
 package com.anfioo.howtocook.app.controller;
 
+import com.anfioo.howtocook.app.aspect.AuditOperation;
 import com.anfioo.howtocook.app.dto.CurrentUserResponse;
 import com.anfioo.howtocook.app.dto.LoginRequest;
 import com.anfioo.howtocook.app.dto.LoginResponse;
@@ -8,15 +9,18 @@ import com.anfioo.howtocook.app.service.AuthService;
 import com.anfioo.howtocook.common.result.Result;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 认证接口：注册 / 登录 / 登出 / 当前用户。
- * <p>register、login 在拦截器白名单中公开；logout、me 需登录。</p>
+ * 认证接口：注册 / 登录 / 登出 / 当前用户 / 角色管理。
+ * <p>register、login 在拦截器白名单中公开；logout、me 需登录；
+ * 角色管理两接口挂在 /api/auth 下，由 SaTokenConfig 显式要求 ADMIN 角色（Review 修订 R4）。</p>
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -48,5 +52,21 @@ public class AuthController {
     @GetMapping("/me")
     public Result<CurrentUserResponse> me() {
         return Result.ok(authService.currentUser());
+    }
+
+    /** 提升用户为管理员（仅 ADMIN；不可操作自己） */
+    @AuditOperation(operation = "GRANT_ADMIN")
+    @PostMapping("/users/{userId}/role")
+    public Result<Void> grantAdmin(@PathVariable long userId) {
+        authService.grantAdmin(userId);
+        return Result.ok();
+    }
+
+    /** 降级用户为普通用户（仅 ADMIN；不可操作自己） */
+    @AuditOperation(operation = "REVOKE_ADMIN")
+    @DeleteMapping("/users/{userId}/role")
+    public Result<Void> revokeAdmin(@PathVariable long userId) {
+        authService.revokeAdmin(userId);
+        return Result.ok();
     }
 }

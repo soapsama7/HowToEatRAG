@@ -19,6 +19,9 @@ public class DocumentSummaryResponse {
     /** 分类 */
     private String category;
 
+    /** 文档类型：RECIPE / TIP / OTHER */
+    private String docType;
+
     /** 难度星级 1-5 */
     private Integer difficulty;
 

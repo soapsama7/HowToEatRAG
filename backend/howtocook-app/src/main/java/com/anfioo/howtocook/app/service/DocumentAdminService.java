@@ -1,15 +1,15 @@
 package com.anfioo.howtocook.app.service;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.anfioo.howtocook.app.dto.BatchImportRequest;
-import com.anfioo.howtocook.app.dto.BatchImportResponse;
 import com.anfioo.howtocook.app.dto.DocumentDetailResponse;
 import com.anfioo.howtocook.app.dto.DocumentUploadResponse;
+import com.anfioo.howtocook.app.mq.DocumentIndexProducer;
 import com.anfioo.howtocook.common.entity.doc.Document;
 import com.anfioo.howtocook.common.entity.doc.DocumentChunk;
 import com.anfioo.howtocook.common.entity.sys.IndexTask;
 import com.anfioo.howtocook.common.enums.doc.DocStatus;
 import com.anfioo.howtocook.common.enums.doc.DocType;
+import com.anfioo.howtocook.common.enums.sys.IndexTaskStatus;
 import com.anfioo.howtocook.common.enums.sys.IndexTaskType;
 import com.anfioo.howtocook.common.mapper.doc.DocumentChunkMapper;
 import com.anfioo.howtocook.common.mapper.doc.DocumentMapper;
@@ -17,23 +17,25 @@ import com.anfioo.howtocook.common.mapper.sys.IndexTaskMapper;
 import com.anfioo.howtocook.common.result.BusinessException;
 import com.anfioo.howtocook.common.result.ErrorCode;
 import com.anfioo.howtocook.common.storage.StorageService;
+import com.anfioo.howtocook.common.util.DigestUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
 /**
- * 管理端文档服务：上传 / 列表 / 详情 / 删除。
- * <p>事务边界约定（开发文档 Review 要点）：RustFS 成功但 DB 失败时允许孤儿对象，仅记录日志不做补偿。</p>
+ * 管理端文档服务：上传 / 列表 / 详情 / 回收站（删除/恢复/彻底清除）。
+ * <p>事务边界约定（开发文档 Review 要点）：RustFS 与 DB 无分布式事务，
+ * DB 失败产生的 RustFS 孤儿对象仅记录日志，不做补偿（purge 的对象删除放事务提交后，同约定）。</p>
  */
 @Slf4j
 @Service
@@ -47,11 +49,12 @@ public class DocumentAdminService {
     private final DocumentChunkMapper documentChunkMapper;
     private final IndexTaskMapper indexTaskMapper;
     private final StorageService storageService;
-    private final com.anfioo.howtocook.app.mq.DocumentIndexProducer documentIndexProducer;
+    private final DocumentIndexProducer documentIndexProducer;
 
     /**
-     * 上传 markdown：校验 → 存 RustFS → 建 document(PENDING) + index_task(PENDING) → 返回 taskNo。
-     * <p>消息发送位由 Step 2.3 接上。</p>
+     * 上传 markdown：校验 → SHA-256 查重 → 存 RustFS → 建 document(PENDING) + index_task(PENDING) → 返回 taskNo。
+     * <p>查重范围：所有未物理删除条目（含回收站，R3 返工）——否则「删除→重传→恢复」会产生重复文档。
+     * 彻底清除（purge）后该内容才允许重新上传。</p>
      */
     @Transactional
     public DocumentUploadResponse upload(MultipartFile file, String docType, String category) {
@@ -68,6 +71,17 @@ public class DocumentAdminService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "读取上传文件失败");
         }
 
+        // 内容哈希查重（R3 返工）：手写 SQL 绕过 @TableLogic，回收站文档同样拦截
+        String contentHash = DigestUtil.sha256Hex(bytes);
+        Document duplicate = documentMapper.selectByContentHash(contentHash);
+        if (duplicate != null) {
+            String hint = duplicate.getDeleted() != null && duplicate.getDeleted() == 1
+                    ? "（该文档当前在回收站中，可恢复使用或彻底清除后再上传）"
+                    : "，请勿重复上传";
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                    "文件内容已存在：docId=" + duplicate.getId() + "（" + duplicate.getTitle() + "）" + hint);
+        }
+
         // objectKey 服务端生成，文件名不参与路径（防路径穿越）
         String objectKey = StorageService.generateObjectKey();
         storageService.putObject(new ByteArrayInputStream(bytes), objectKey);
@@ -78,6 +92,7 @@ public class DocumentAdminService {
         document.setCategory(category);
         document.setObjectKey(objectKey);
         document.setFileSize((long) bytes.length);
+        document.setContentHash(contentHash);
         document.setStatus(DocStatus.PENDING.name());
         document.setUploaderId(StpUtil.getLoginIdAsLong());
         try {
@@ -93,7 +108,7 @@ public class DocumentAdminService {
         task.setTaskNo(taskNo);
         task.setDocId(document.getId());
         task.setTaskType(IndexTaskType.INDEX.name());
-        task.setStatus(com.anfioo.howtocook.common.enums.sys.IndexTaskStatus.PENDING.name());
+        task.setStatus(IndexTaskStatus.PENDING.name());
         indexTaskMapper.insert(task);
 
         // Step 2.3：投递索引消息 {taskNo, docId}
@@ -140,16 +155,72 @@ public class DocumentAdminService {
     }
 
     /**
-     * 删除：逻辑删 document + 物理删该文档全部 chunk（同事务）。
+     * 删除（R2 改造）：移入回收站——仅逻辑删 document（记录 deleted_at），chunk 与 RustFS 文件保留，
+     * 保留期内可恢复。检索不受影响（召回 SQL 自带 d.deleted = 0 过滤）；
+     * 在途索引任务由消费端按「文档已删除」取消。
      */
-    @Transactional
     public void delete(long id) {
         Document document = requireDocument(id);
-        documentMapper.deleteById(id);
+        int updated = documentMapper.moveToRecycleBin(id);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "删除失败，请重试");
+        }
+        log.info("文档已移入回收站: id={}, objectKey={}", id, document.getObjectKey());
+    }
+
+    /** 回收站分页列表（按删除时间倒序） */
+    public Page<Document> recycleBin(long pageNum, long pageSize) {
+        return documentMapper.selectRecycleBin(new Page<>(pageNum, pageSize));
+    }
+
+    /**
+     * 恢复：反逻辑删（deleted=0 + 清空 deleted_at）。
+     * chunk 保留未删，READY 文档恢复后检索立即可见；PENDING/FAILED 文档可手动 reindex。
+     */
+    public void restore(long id) {
+        int updated = documentMapper.restoreById(id);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "回收站中不存在该文档");
+        }
+        log.info("文档已从回收站恢复: id={}", id);
+    }
+
+    /**
+     * 彻底清除（回收站 → 不可恢复）：同事务物理删 chunks + document + 未完结索引任务；
+     * RustFS 对象删除放事务提交后执行，失败仅告警不做补偿（孤儿对象，同上传侧约定）。
+     */
+    @Transactional
+    public void purge(long id) {
+        Document document = documentMapper.selectDeletedById(id);
+        if (document == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "回收站中不存在该文档");
+        }
         documentChunkMapper.delete(new LambdaQueryWrapper<DocumentChunk>()
                 .eq(DocumentChunk::getDocId, id));
-        // 索引任务若在途，由索引服务按文档状态判断后跳过（文档已删除，索引结果不可见）
-        log.info("文档已删除: id={}, objectKey={}", id, document.getObjectKey());
+        // 未完结（PENDING/PROCESSING）任务一并清理，避免任务列表残留死任务；
+        // 已发出的在途消息由消费端「任务不存在/文档已删除」分支静默终结
+        indexTaskMapper.delete(new LambdaQueryWrapper<IndexTask>()
+                .eq(IndexTask::getDocId, id)
+                .in(IndexTask::getStatus, IndexTaskStatus.PENDING.name(), IndexTaskStatus.PROCESSING.name()));
+        int deleted = documentMapper.purgeById(id);
+        if (deleted == 0) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "清除失败，请重试");
+        }
+
+        // 对象删除放在 DB 事务提交之后：事务回滚时对象仍在，恢复一致
+        String objectKey = document.getObjectKey();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    storageService.deleteObject(objectKey);
+                    log.info("回收站清除完成，RustFS 对象已删除: docId={}, objectKey={}", id, objectKey);
+                } catch (Exception e) {
+                    log.error("RustFS 对象删除失败（孤儿对象，需人工清理）: docId={}, objectKey={}", id, objectKey, e);
+                }
+            }
+        });
+        log.info("文档已从回收站彻底清除: id={}, objectKey={}", id, objectKey);
     }
 
     /**
@@ -164,131 +235,71 @@ public class DocumentAdminService {
         if (updated == 0) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "重索引并发冲突，请重试");
         }
-        String taskNo = UUID.randomUUID().toString();
-        IndexTask task = new IndexTask();
-        task.setTaskNo(taskNo);
-        task.setDocId(id);
-        task.setTaskType(IndexTaskType.REINDEX.name());
-        task.setStatus(com.anfioo.howtocook.common.enums.sys.IndexTaskStatus.PENDING.name());
-        indexTaskMapper.insert(task);
-        documentIndexProducer.send(taskNo, id);
-        return taskNo;
+        return createReindexTask(id);
     }
 
     /**
-     * 批量导入（Step 2.5，本地开发用）：遍历 dirPath 下 dishes/**（排除 template）与 tips/**，
-     * 逐个走「上传 + 建任务 + 投递」链路，索引异步完成。返回导入汇总。
+     * 修改文档内容并重索引（用户新增需求）：
+     * 校验内容与查重 → 覆盖写 RustFS 原文（objectKey 不变，重索引即读新内容）→ 更新元数据
+     * → version+1 → 建 REINDEX 任务投递消息。
+     * <p>标题/难度/卡路里等由重索引时解析器按新内容回填（与上传侧行为一致）。</p>
      */
-    public BatchImportResponse batchImport(String dirPath) {
-        java.nio.file.Path root = java.nio.file.Path.of(dirPath);
-        if (!java.nio.file.Files.isDirectory(root)) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "目录不存在: " + dirPath);
+    @Transactional
+    public String updateContent(long id, String content, String docType, String category) {
+        if (content == null || content.isBlank()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "文档内容不能为空");
         }
-        java.nio.file.Path dishes = root.resolve("dishes");
-        java.nio.file.Path tips = root.resolve("tips");
-        if (!java.nio.file.Files.isDirectory(dishes) && !java.nio.file.Files.isDirectory(tips)) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "目录下未找到 dishes/ 与 tips/ 子目录");
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length > MAX_FILE_SIZE) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "内容超过 2MB 上限");
         }
-
-        List<String> failures = new ArrayList<>();
-        int total = 0;
-        int succeeded = 0;
-
-        // dishes/<分类目录>/*.md（template 排除）
-        if (java.nio.file.Files.isDirectory(dishes)) {
-            try (var dirs = java.nio.file.Files.list(dishes)) {
-                for (java.nio.file.Path categoryDir : dirs.filter(java.nio.file.Files::isDirectory)
-                        .filter(d -> com.anfioo.howtocook.common.document.CategoryNames.importable(d.getFileName().toString()))
-                        .toList()) {
-                    String category = com.anfioo.howtocook.common.document.CategoryNames.NAMES
-                            .get(categoryDir.getFileName().toString());
-                    try (var files = java.nio.file.Files.list(categoryDir)) {
-                        for (java.nio.file.Path file : files
-                                .filter(f -> f.getFileName().toString().toLowerCase().endsWith(".md"))
-                                .toList()) {
-                            total++;
-                            if (importOne(file, DocType.RECIPE.name(), category)) {
-                                succeeded++;
-                            } else {
-                                failures.add(file.getFileName() + ": 入库失败（见日志）");
-                            }
-                        }
-                    } catch (Exception e) {
-                        log.warn("遍历分类目录失败: {}", categoryDir, e);
-                    }
-                }
-            } catch (Exception e) {
-                throw new BusinessException(ErrorCode.INTERNAL_ERROR, "遍历 dishes 目录失败: " + e.getMessage());
-            }
+        if (docType != null && !docType.isBlank()
+                && !DocType.RECIPE.name().equals(docType)
+                && !DocType.TIP.name().equals(docType) && !DocType.OTHER.name().equals(docType)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "docType 仅允许 RECIPE/TIP/OTHER");
         }
 
-        // tips/**/*.md（递归）
-        if (java.nio.file.Files.isDirectory(tips)) {
-            try (var files = java.nio.file.Files.walk(tips)) {
-                for (java.nio.file.Path file : files
-                        .filter(java.nio.file.Files::isRegularFile)
-                        .filter(f -> f.getFileName().toString().toLowerCase().endsWith(".md"))
-                        .toList()) {
-                    total++;
-                    if (importOne(file, DocType.TIP.name(), com.anfioo.howtocook.common.document.CategoryNames.NAMES.get("tips"))) {
-                        succeeded++;
-                    } else {
-                        failures.add(file.getFileName() + ": 入库失败（见日志）");
-                    }
-                }
-            } catch (Exception e) {
-                throw new BusinessException(ErrorCode.INTERNAL_ERROR, "遍历 tips 目录失败: " + e.getMessage());
-            }
+        Document document = requireDocument(id);
+        String newHash = DigestUtil.sha256Hex(bytes);
+        Document duplicate = documentMapper.selectByContentHash(newHash);
+        if (duplicate != null && !duplicate.getId().equals(id)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                    "内容与其他文档重复：docId=" + duplicate.getId() + "（" + duplicate.getTitle() + "）");
         }
 
-        return com.anfioo.howtocook.app.dto.BatchImportResponse.builder()
-                .total(total)
-                .succeeded(succeeded)
-                .failed(failures.size())
-                .failures(failures.size() > 50 ? failures.subList(0, 50) : failures)
-                .build();
+        // 覆盖写 RustFS（沿用上传侧约定：DB 失败产生的内容不一致由下次重索引/更新自愈，不做补偿）
+        storageService.putObject(new ByteArrayInputStream(bytes), document.getObjectKey());
+
+        document.setContentHash(newHash);
+        document.setFileSize((long) bytes.length);
+        if (docType != null && !docType.isBlank()) {
+            document.setDocType(docType);
+        }
+        if (category != null && !category.isBlank()) {
+            document.setCategory(category);
+        }
+        document.setStatus(DocStatus.PENDING.name());
+        document.setErrorMsg(null);
+        // @Version 拦截器自动 version+1
+        int updated = documentMapper.updateById(document);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "更新并发冲突，请重试");
+        }
+        log.info("文档内容已更新，等待重索引: id={}, objectKey={}", id, document.getObjectKey());
+        return createReindexTask(id);
     }
 
-    /** 单文件导入：成功 true / 失败 false（失败仅告警，不中断批量） */
-    private boolean importOne(java.nio.file.Path file, String docType, String category) {
-        try {
-            byte[] bytes = java.nio.file.Files.readAllBytes(file);
-            if (bytes.length > MAX_FILE_SIZE) {
-                log.warn("批量导入跳过超限文件: {} ({}B)", file.getFileName(), bytes.length);
-                return false;
-            }
-            String objectKey = StorageService.generateObjectKey();
-            storageService.putObject(new ByteArrayInputStream(bytes), objectKey);
-
-            Document document = new Document();
-            String filename = file.getFileName().toString().replaceAll("(?i)\\.md$", "");
-            document.setTitle(filename);
-            document.setDocType(docType);
-            document.setCategory(category);
-            document.setObjectKey(objectKey);
-            document.setFileSize((long) bytes.length);
-            document.setStatus(DocStatus.PENDING.name());
-            document.setUploaderId(StpUtil.getLoginIdAsLong());
-            try {
-                documentMapper.insert(document);
-            } catch (Exception e) {
-                log.error("批量导入 document 入库失败，RustFS 孤儿对象: {}", objectKey, e);
-                throw e;
-            }
-
-            String taskNo = UUID.randomUUID().toString();
-            IndexTask task = new IndexTask();
-            task.setTaskNo(taskNo);
-            task.setDocId(document.getId());
-            task.setTaskType(IndexTaskType.INDEX.name());
-            task.setStatus(com.anfioo.howtocook.common.enums.sys.IndexTaskStatus.PENDING.name());
-            indexTaskMapper.insert(task);
-            documentIndexProducer.send(taskNo, document.getId());
-            return true;
-        } catch (Exception e) {
-            log.warn("批量导入单文件失败: {}, error={}", file.getFileName(), e.getMessage());
-            return false;
-        }
+    /** 建 REINDEX 任务并投递索引消息（reindex / updateContent 共用） */
+    private String createReindexTask(long docId) {
+        String taskNo = UUID.randomUUID().toString();
+        IndexTask task = new IndexTask();
+        task.setTaskNo(taskNo);
+        task.setDocId(docId);
+        task.setTaskType(IndexTaskType.REINDEX.name());
+        task.setStatus(IndexTaskStatus.PENDING.name());
+        indexTaskMapper.insert(task);
+        documentIndexProducer.send(taskNo, docId);
+        return taskNo;
     }
 
     /** 校验上传文件：仅 .md、≤2MB、非空 */

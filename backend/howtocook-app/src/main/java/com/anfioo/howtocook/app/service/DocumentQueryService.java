@@ -25,14 +25,17 @@ public class DocumentQueryService {
     private final DocumentMapper documentMapper;
     private final StorageService storageService;
 
-    /** 菜谱列表：仅 READY，标题关键词模糊检索，ID 倒序 */
-    public Page<DocumentSummaryResponse> list(long pageNum, long pageSize, String keyword) {
+    /** 菜谱列表：仅 READY，标题关键词模糊检索、可按类型过滤（RECIPE/TIP/OTHER），ID 倒序 */
+    public Page<DocumentSummaryResponse> list(long pageNum, long pageSize, String keyword, String docType) {
         Page<Document> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>()
                 .eq(Document::getStatus, DocStatus.READY.name())
                 .orderByDesc(Document::getId);
         if (keyword != null && !keyword.isBlank()) {
             wrapper.like(Document::getTitle, keyword.trim());
+        }
+        if (docType != null && !docType.isBlank()) {
+            wrapper.eq(Document::getDocType, docType.trim());
         }
         Page<Document> result = documentMapper.selectPage(page, wrapper);
         Page<DocumentSummaryResponse> response = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
@@ -41,6 +44,7 @@ public class DocumentQueryService {
                         .id(d.getId())
                         .title(d.getTitle())
                         .category(d.getCategory())
+                        .docType(d.getDocType())
                         .difficulty(d.getDifficulty())
                         .cookMinutes(d.getCookMinutes())
                         .calories(d.getCalories())

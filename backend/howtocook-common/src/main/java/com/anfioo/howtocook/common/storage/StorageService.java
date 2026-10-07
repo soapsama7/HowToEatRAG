@@ -2,6 +2,8 @@ package com.anfioo.howtocook.common.storage;
 
 import java.io.InputStream;
 
+import static java.util.UUID.randomUUID;
+
 /**
  * 存储服务抽象：S3 兼容（RustFS）上传 / 下载 / 删除。
  * <p>objectKey 一律由服务端生成（uuid.md），不使用用户输入，防路径穿越（Step 2.1 / Review 要点）。</p>
@@ -22,6 +24,6 @@ public interface StorageService {
 
     /** 服务端生成对象键：uuid.md（文件名不参与路径，防路径穿越） */
     static String generateObjectKey() {
-        return java.util.UUID.randomUUID() + ".md";
+        return randomUUID() + ".md";
     }
 }

@@ -96,8 +96,6 @@ public class ConversationController {
 
         emitter.onTimeout(() -> disconnected.set(true));
         emitter.onError(t -> disconnected.set(true));
-        // 会话槽位随 SSE 终结（complete/error/timeout）统一释放
-        emitter.onCompletion(() -> rateLimitService.releaseSlot(userId));
 
         // 心跳：注释帧不计入事件流
         ScheduledFuture<?> heartbeat = heartbeatExecutor.scheduleAtFixedRate(() -> {
@@ -141,12 +139,13 @@ public class ConversationController {
             emitter.complete();
         });
 
-        // 客户端断开：停止心跳 + 中止模型生成（Flux 取消传播到 ChatClient）
+        // 会话终结（正常结束/客户端断开/超时）：停止心跳、中止模型生成、释放限流槽位
         emitter.onCompletion(() -> {
             heartbeat.cancel(false);
             if (subscription != null && !subscription.isDisposed()) {
                 subscription.dispose();
             }
+            rateLimitService.releaseSlot(userId);
         });
         return emitter;
     }

@@ -108,6 +108,11 @@ howtocook:
     memory-window:                     # ChatMemory 携带最近消息条数
   security:
     internal-token:                    # 环境变量 ${MCP_INTERNAL_TOKEN}，调 MCP Server 的预共享 Token
+  recycle-bin:                         # 回收站（Review 修订 R2）
+    retention-days:                    # 保留天数（默认 30），超过由定时任务彻底清除
+    purge-cron:                        # 清理计划 cron（默认 "0 0 3 * * ?" 每天 03:00）
+  chunk:                               # 索引 chunk 兜底（purge 与在途索引任务竞态产生的孤儿 chunk）
+    orphan-cleanup-cron:               # 孤儿 chunk 清理计划 cron（默认 "0 30 3 * * ?" 每天 03:30）
 
 management:                            # 运维端点：仅放开 health
   endpoints:

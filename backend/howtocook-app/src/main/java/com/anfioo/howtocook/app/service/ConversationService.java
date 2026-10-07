@@ -21,6 +21,8 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 
+import static java.util.Collections.reverse;
+
 /**
  * 会话服务：会话 CRUD（归属校验）+ 历史消息查询 + 消息落库（供对话链路与 ChatMemory 复用）。
  */
@@ -135,7 +137,7 @@ public class ConversationService {
                 .in(Message::getMessageType, MessageType.USER_MESSAGE.name(), MessageType.FINAL_ANSWER.name())
                 .orderByDesc(Message::getId)
                 .last("LIMIT " + limit));
-        java.util.Collections.reverse(recent);
+        reverse(recent);
         List<MemoryTurn> turns = new ArrayList<>(recent.size());
         for (Message message : recent) {
             turns.add(MemoryTurn.builder()

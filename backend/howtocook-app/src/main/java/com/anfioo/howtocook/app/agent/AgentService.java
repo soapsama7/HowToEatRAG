@@ -9,7 +9,6 @@ import com.anfioo.howtocook.app.service.PreferenceService;
 import com.anfioo.howtocook.common.constant.AgentPrompts;
 import com.anfioo.howtocook.common.enums.chat.MessageType;
 import com.anfioo.howtocook.common.enums.chat.MessageRole;
-import com.anfioo.howtocook.common.result.BusinessException;
 import com.anfioo.howtocook.common.result.ErrorCode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +18,7 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
@@ -45,7 +45,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class AgentService {
 
     /** 携带的最近消息条数（howtocook.agent.memory-window） */
-    @org.springframework.beans.factory.annotation.Value("${howtocook.agent.memory-window:10}")
+    @Value("${howtocook.agent.memory-window:10}")
     private int memoryWindow;
 
     private final ChatClient chatClient;
@@ -69,34 +69,6 @@ public class AgentService {
         this.objectMapper = objectMapper;
     }
 
-    /** 同步问答（Step 4.2 验收与临时冒烟用；线上走 askStream） */
-    public AgentRunResult ask(long conversationId, long userId, String question) {
-        AgentSetup setup = prepare(conversationId, userId, question);
-        String answer;
-        try {
-            answer = chatClient.prompt()
-                    .system(setup.systemPrompt())
-                    .messages(setup.history())
-                    .user(question)
-                    .toolCallbacks(setup.tools())
-                    .call()
-                    .content();
-        } catch (Exception e) {
-            log.error("Agent 调用失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
-            throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE, "对话服务暂时不可用，请稍后再试");
-        }
-        String finalAnswer = answer == null ? "" : answer;
-        conversationService.appendMessage(conversationId, MessageRole.ASSISTANT.name(),
-                MessageType.FINAL_ANSWER.name(), finalAnswer, null,
-                toJson(setup.context().getReferences()), toJson(setup.context().getTrace()));
-
-        AgentRunResult result = new AgentRunResult();
-        result.setFinalAnswer(finalAnswer);
-        result.setTrace(setup.context().getTrace());
-        result.setReferences(setup.context().getReferences());
-        return result;
-    }
-
     /**
      * 流式问答（Step 4.3）：按 §5.6 契约产出事件流。
      * <p>客户端断开时（Flux 被取消）底层模型调用一并中止；最终回答取"最后一次工具调用之后的
@@ -107,7 +79,7 @@ public class AgentService {
         StringBuilder currentSegment = new StringBuilder();
         AtomicReference<String> finalAnswer = new AtomicReference<>("");
 
-        return Flux.<AgentEvent>create(sink -> {
+        return Flux.create(sink -> {
             // 工具实时事件：TOOL_START / TOOL_RESULT
             setup.context().setTraceListener(entry -> {
                 String event = String.valueOf(entry.get("event"));
@@ -116,6 +88,7 @@ public class AgentService {
                 data.put("step", entry.get("step"));
                 if ("TOOL_RESULT".equals(event)) {
                     data.put("summary", entry.get("summary"));
+                    data.put("elapsedMs", entry.get("elapsedMs"));
                 }
                 sink.next(AgentEvent.of(event, data));
                 // 工具返回后重置内容段：最终答案 = 最后一次工具调用之后的内容

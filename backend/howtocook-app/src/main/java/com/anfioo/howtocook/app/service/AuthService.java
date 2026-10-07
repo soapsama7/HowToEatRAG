@@ -117,16 +117,70 @@ public class AuthService {
                 .toList();
     }
 
+    /**
+     * 提升为管理员（Review 修订 R4）：
+     * 目标用户须存在；不可操作自己（防误降级后无可用管理员）；已具备 ADMIN 视为重复操作报 400。
+     */
+    public void grantAdmin(long targetUserId) {
+        requireManageable(targetUserId);
+        if (hasRole(targetUserId, RoleCode.ADMIN.name())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "该用户已是管理员");
+        }
+        bindRole(targetUserId, RoleCode.ADMIN.name());
+        log.info("用户已提升为管理员: targetUserId={}, operator={}", targetUserId, StpUtil.getLoginIdAsLong());
+    }
+
+    /**
+     * 降级为普通用户（Review 修订 R4）：移除 ADMIN 绑定；若 USER 绑定缺失则补绑。
+     * 不具备 ADMIN 视为重复操作报 400。
+     */
+    public void revokeAdmin(long targetUserId) {
+        requireManageable(targetUserId);
+        Role adminRole = requireRole(RoleCode.ADMIN.name());
+        if (!hasRole(targetUserId, RoleCode.ADMIN.name())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "该用户不是管理员");
+        }
+        userRoleMapper.delete(new LambdaQueryWrapper<UserRole>()
+                .eq(UserRole::getUserId, targetUserId)
+                .eq(UserRole::getRoleId, adminRole.getId()));
+        if (!hasRole(targetUserId, RoleCode.USER.name())) {
+            bindRole(targetUserId, RoleCode.USER.name());
+        }
+        log.info("用户已降级为普通用户: targetUserId={}, operator={}", targetUserId, StpUtil.getLoginIdAsLong());
+    }
+
+    /** 角色管理公共校验：目标用户存在 + 禁止操作自己 */
+    private void requireManageable(long targetUserId) {
+        User target = userMapper.selectById(targetUserId);
+        if (target == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "目标用户不存在");
+        }
+        if (targetUserId == StpUtil.getLoginIdAsLong()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "不能操作自己的角色");
+        }
+    }
+
+    /** 用户是否拥有某角色编码 */
+    private boolean hasRole(long userId, String roleCode) {
+        return getRoleCodes(userId).contains(roleCode);
+    }
+
     /** 给用户绑定角色（按角色编码） */
     private void bindRole(long userId, String roleCode) {
+        Role role = requireRole(roleCode);
+        UserRole userRole = new UserRole();
+        userRole.setUserId(userId);
+        userRole.setRoleId(role.getId());
+        userRoleMapper.insert(userRole);
+    }
+
+    /** 按编码查角色（种子数据缺失视为内部错误） */
+    private Role requireRole(String roleCode) {
         Role role = roleMapper.selectOne(new LambdaQueryWrapper<Role>()
                 .eq(Role::getCode, roleCode));
         if (role == null) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "角色种子数据缺失: " + roleCode);
         }
-        UserRole userRole = new UserRole();
-        userRole.setUserId(userId);
-        userRole.setRoleId(role.getId());
-        userRoleMapper.insert(userRole);
+        return role;
     }
 }

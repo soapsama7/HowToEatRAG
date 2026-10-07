@@ -4,6 +4,7 @@ import com.anfioo.howtocook.common.entity.doc.DocumentChunk;
 import com.anfioo.howtocook.common.retrieval.ChunkResult;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.pgvector.PGvector;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -42,4 +43,19 @@ public interface DocumentChunkMapper extends BaseMapper<DocumentChunk> {
             LIMIT #{limit}
             """)
     List<ChunkResult> keywordRecall(@Param("query") String query, @Param("limit") int limit);
+
+    /**
+     * 清理孤儿 chunk：doc_id 已无对应 document 行（purge 物理删 document 与在途索引任务
+     * 竞态写入所致）。分批删除，返回本批删除行数；返回 0 表示已无孤儿。
+     */
+    @Delete("""
+            DELETE FROM document_chunk
+            WHERE id IN (
+                SELECT c.id
+                FROM document_chunk c
+                WHERE NOT EXISTS (SELECT 1 FROM document d WHERE d.id = c.doc_id)
+                LIMIT #{limit}
+            )
+            """)
+    int deleteOrphans(@Param("limit") int limit);
 }

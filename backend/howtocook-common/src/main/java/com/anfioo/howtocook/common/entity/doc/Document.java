@@ -36,6 +36,9 @@ public class Document {
     /** RustFS 对象键（服务端生成 uuid.md，防路径穿越） */
     private String objectKey;
 
+    /** 文件内容 SHA-256（hex 小写），上传查重用；存量由启动任务回填 */
+    private String contentHash;
+
     /** 文件大小（字节） */
     private Long fileSize;
 
@@ -72,7 +75,10 @@ public class Document {
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
 
-    /** 逻辑删除：0 未删 1 已删 */
+    /** 逻辑删除：0 未删 1 已删（1 = 在回收站中） */
     @TableLogic
     private Integer deleted;
+
+    /** 进入回收站时间（逻辑删除时间；NULL=未删除），延迟清除的计时依据 */
+    private LocalDateTime deletedAt;
 }

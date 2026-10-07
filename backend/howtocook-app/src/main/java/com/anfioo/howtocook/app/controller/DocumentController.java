@@ -22,12 +22,13 @@ public class DocumentController {
 
     private final DocumentQueryService documentQueryService;
 
-    /** 菜谱列表（仅 READY，分页 + 关键词） */
+    /** 菜谱列表（仅 READY，分页 + 关键词 + 类型过滤） */
     @GetMapping
     public Result<Page<DocumentSummaryResponse>> list(@RequestParam(defaultValue = "1") long pageNum,
                                                       @RequestParam(defaultValue = "20") long pageSize,
-                                                      @RequestParam(required = false) String keyword) {
-        return Result.ok(documentQueryService.list(pageNum, pageSize, keyword));
+                                                      @RequestParam(required = false) String keyword,
+                                                      @RequestParam(required = false) String docType) {
+        return Result.ok(documentQueryService.list(pageNum, pageSize, keyword, docType));
     }
 
     /** 菜谱详情（RustFS 原文） */

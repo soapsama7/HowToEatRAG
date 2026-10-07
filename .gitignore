@@ -9,6 +9,7 @@
 # ==== 构建产物 ====
 target/
 *.class
+frontend/
 
 # ==== 本地真实配置（只进 application-example.yml 模板与 .env.example） ====
 backend/howtocook-app/src/main/resources/application.yml
@@ -23,10 +24,10 @@ logs/
 .DS_Store
 Thumbs.db
 
+# ==== 设计/进度文档 ====
 方案设计.md
 进度记录.md
+进度记录_part2.md
 
-# ==== 前端（开发文档阶段 F：不上传 GitHub，仓库策略另行管理） ====
-frontend/
-
-.workbuddy/memory
+# ==== AI 工作区（临时测试文件、token、脚本、记忆，勿上传） ====
+.workbuddy/
