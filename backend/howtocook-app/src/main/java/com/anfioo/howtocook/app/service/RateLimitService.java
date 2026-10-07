@@ -1,5 +1,6 @@
 package com.anfioo.howtocook.app.service;
 
+import com.anfioo.howtocook.common.constant.RedisKeys;
 import com.anfioo.howtocook.common.result.BusinessException;
 import com.anfioo.howtocook.common.result.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +25,6 @@ import java.util.concurrent.Semaphore;
 @Service
 public class RateLimitService {
 
-    private static final String RATE_KEY_PREFIX = "howtocook:chat:rate:";
     /** 分钟窗口长度（秒） */
     private static final long WINDOW_SECONDS = 60;
 
@@ -48,7 +48,7 @@ public class RateLimitService {
     /** 频次检查：每用户每分钟窗口计数，超限 429（被拒请求同样计数，防止刷接口绕过） */
     public void checkChatRateLimit(long userId) {
         long window = System.currentTimeMillis() / (WINDOW_SECONDS * 1000);
-        String key = RATE_KEY_PREFIX + userId + ":" + window;
+        String key = RedisKeys.chatRate(userId, window);
         try {
             Long count = redisTemplate.opsForValue().increment(key);
             if (count != null && count == 1) {

@@ -1,6 +1,7 @@
 package com.anfioo.howtocook.app.mq;
 
 import com.anfioo.howtocook.app.service.DocumentIndexService;
+import com.anfioo.howtocook.common.constant.RedisKeys;
 import com.anfioo.howtocook.common.entity.doc.Document;
 import com.anfioo.howtocook.common.entity.sys.IndexTask;
 import com.anfioo.howtocook.common.enums.doc.DocStatus;
@@ -29,7 +30,6 @@ import java.time.Duration;
 public class DocumentIndexConsumer implements RocketMQListener<DocumentIndexMessage> {
 
     private static final int MAX_RETRY = 3;
-    private static final String LOCK_KEY_PREFIX = "index:task:lock:";
 
     private final IndexTaskMapper indexTaskMapper;
     private final DocumentMapper documentMapper;
@@ -38,7 +38,7 @@ public class DocumentIndexConsumer implements RocketMQListener<DocumentIndexMess
 
     @Override
     public void onMessage(DocumentIndexMessage message) {
-        String lockKey = LOCK_KEY_PREFIX + message.getTaskNo();
+        String lockKey = RedisKeys.indexTaskLock(message.getTaskNo());
         Boolean locked = redisTemplate.opsForValue()
                 .setIfAbsent(lockKey, "1", Duration.ofSeconds(120));
         if (!Boolean.TRUE.equals(locked)) {

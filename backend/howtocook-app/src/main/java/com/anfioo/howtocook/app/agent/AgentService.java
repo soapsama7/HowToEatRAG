@@ -7,17 +7,18 @@ import com.anfioo.howtocook.app.service.ConversationService;
 import com.anfioo.howtocook.app.service.McpClientSupport;
 import com.anfioo.howtocook.app.service.PreferenceService;
 import com.anfioo.howtocook.app.service.RateLimitService;
-import com.anfioo.howtocook.common.constant.AgentPrompts;
 import com.anfioo.howtocook.common.enums.chat.MessageType;
 import com.anfioo.howtocook.common.enums.chat.MessageRole;
 import com.anfioo.howtocook.common.result.ErrorCode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -25,6 +26,8 @@ import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,7 +42,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Agent 服务（开发文档 §5.5 / Step 4.2/4.3）：Agentic RAG 决策链路。
  * <ul>
- *   <li>System Prompt：AgentPrompts 模板 + 用户偏好注入；</li>
+ *   <li>System Prompt：外部化模板（prompts/system.md）+ 用户偏好注入；</li>
  *   <li>工具：MCP search_chunks / get_recipe_detail（经 TracedToolCallback 包装，收集 trace/引用并强制轮数/超时约束）；</li>
  *   <li>记忆：AgentHistoryAdvisor 在 before 阶段读取最近 memory-window 条历史注入上下文（仅 USER_MESSAGE / FINAL_ANSWER）；</li>
  *   <li>落库：USER 消息与 ASSISTANT(FINAL_ANSWER) 消息由本服务持久化，trace/references 随 ASSISTANT 消息保存。</li>
@@ -52,6 +55,12 @@ public class AgentService {
     /** 携带的最近消息条数（howtocook.agent.memory-window） */
     @Value("${howtocook.agent.memory-window:10}")
     private int memoryWindow;
+
+    /** System Prompt 模板（外部化到 prompts/system.md，启动时加载一次） */
+    @Value("classpath:prompts/system.md")
+    private Resource systemPromptResource;
+
+    private String systemPromptTemplate;
 
     private final ChatClient chatClient;
     private final ToolCallbackProvider toolCallbackProvider;
@@ -88,6 +97,17 @@ public class AgentService {
         this.objectMapper = objectMapper;
     }
 
+    /** 启动时加载一次 System Prompt 模板（外部化，含 %s 偏好占位） */
+    @PostConstruct
+    public void loadSystemPrompt() {
+        try {
+            systemPromptTemplate = new String(systemPromptResource.getInputStream().readAllBytes(),
+                    StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new IllegalStateException("加载 System Prompt 模板失败: prompts/system.md", e);
+        }
+    }
+
     /** 应用关闭时停掉心跳线程池 */
     @PreDestroy
     public void shutdown() {
@@ -107,7 +127,7 @@ public class AgentService {
         ToolCallback[] tools = Arrays.stream(toolCallbackProvider.getToolCallbacks())
                 .map(cb -> (ToolCallback) new TracedToolCallback(cb, context, objectMapper))
                 .toArray(ToolCallback[]::new);
-        String systemPrompt = String.format(AgentPrompts.SYSTEM_PROMPT_TEMPLATE,
+        String systemPrompt = String.format(systemPromptTemplate,
                 preferenceService.loadAsPromptText(userId));
         conversationService.appendMessage(conversationId, MessageRole.USER.name(),
                 MessageType.USER_MESSAGE.name(), question, null, null, null);
