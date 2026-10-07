@@ -149,15 +149,42 @@ public class AuthService {
         log.info("用户已降级为普通用户: targetUserId={}, operator={}", targetUserId, StpUtil.getLoginIdAsLong());
     }
 
-    /** 角色管理公共校验：目标用户存在 + 禁止操作自己 */
-    private void requireManageable(long targetUserId) {
+    /**
+     * 封号（ROOT 权限，路由层保证）：目标用户须存在、禁止操作自己、重复封禁报 400。
+     */
+    public void banUser(long targetUserId) {
+        User target = requireManageable(targetUserId);
+        if (target.getStatus() != null && target.getStatus() == 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "该用户已被封禁");
+        }
+        target.setStatus(0);
+        userMapper.updateById(target);
+        log.info("用户已封禁: targetUserId={}, operator={}", targetUserId, StpUtil.getLoginIdAsLong());
+    }
+
+    /**
+     * 解封（ROOT 权限，路由层保证）：目标用户须存在、禁止操作自己、重复解封报 400。
+     */
+    public void unbanUser(long targetUserId) {
+        User target = requireManageable(targetUserId);
+        if (target.getStatus() == null || target.getStatus() == 1) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "该用户未被封禁");
+        }
+        target.setStatus(1);
+        userMapper.updateById(target);
+        log.info("用户已解封: targetUserId={}, operator={}", targetUserId, StpUtil.getLoginIdAsLong());
+    }
+
+    /** 用户管理公共校验：目标用户存在 + 禁止操作自己，返回目标用户 */
+    private User requireManageable(long targetUserId) {
         User target = userMapper.selectById(targetUserId);
         if (target == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "目标用户不存在");
         }
         if (targetUserId == StpUtil.getLoginIdAsLong()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "不能操作自己的角色");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "不能操作自己");
         }
+        return target;
     }
 
     /** 用户是否拥有某角色编码 */

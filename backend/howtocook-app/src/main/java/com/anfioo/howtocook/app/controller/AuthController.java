@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 认证接口：注册 / 登录 / 登出 / 当前用户 / 角色管理。
  * <p>register、login 在拦截器白名单中公开；logout、me 需登录；
- * 角色管理两接口挂在 /api/auth 下，由 SaTokenConfig 显式要求 ADMIN 角色（Review 修订 R4）。</p>
+ * 用户管理接口（提权/降权、封号/解封）挂在 /api/auth 下，由 SaTokenConfig 显式要求 ROOT 角色（优化 2.2 三档权限）。</p>
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -54,7 +54,7 @@ public class AuthController {
         return Result.ok(authService.currentUser());
     }
 
-    /** 提升用户为管理员（仅 ADMIN；不可操作自己） */
+    /** 提升用户为管理员（仅 ROOT；不可操作自己） */
     @AuditOperation(operation = "GRANT_ADMIN")
     @PostMapping("/users/{userId}/role")
     public Result<Void> grantAdmin(@PathVariable long userId) {
@@ -62,11 +62,27 @@ public class AuthController {
         return Result.ok();
     }
 
-    /** 降级用户为普通用户（仅 ADMIN；不可操作自己） */
+    /** 降级用户为普通用户（仅 ROOT；不可操作自己） */
     @AuditOperation(operation = "REVOKE_ADMIN")
     @DeleteMapping("/users/{userId}/role")
     public Result<Void> revokeAdmin(@PathVariable long userId) {
         authService.revokeAdmin(userId);
+        return Result.ok();
+    }
+
+    /** 封禁用户（仅 ROOT） */
+    @AuditOperation(operation = "BAN_USER")
+    @PostMapping("/users/{userId}/ban")
+    public Result<Void> banUser(@PathVariable long userId) {
+        authService.banUser(userId);
+        return Result.ok();
+    }
+
+    /** 解封用户（仅 ROOT） */
+    @AuditOperation(operation = "UNBAN_USER")
+    @DeleteMapping("/users/{userId}/ban")
+    public Result<Void> unbanUser(@PathVariable long userId) {
+        authService.unbanUser(userId);
         return Result.ok();
     }
 }

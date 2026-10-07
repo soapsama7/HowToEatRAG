@@ -39,13 +39,13 @@ public class SaTokenConfig implements WebMvcConfigurer {
                     SaRouter.match("/**")
                             .notMatch(AUTH_WHITELIST)
                             .check(r -> StpUtil.checkLogin());
-                    // 2) 管理端要求 ADMIN 角色（RBAC 数据源：StpInterfaceImpl）
+                    // 2) 管理端要求 ADMIN 或 ROOT 角色（ROOT 继承 ADMIN 权限；RBAC 数据源：StpInterfaceImpl）
                     SaRouter.match("/api/admin/**")
-                            .check(r -> StpUtil.checkRole(RoleCode.ADMIN.name()));
-                    // 3) 角色管理接口（Review 修订 R4）：挂在 /api/auth 下，/api/admin/** 规则覆盖不到，
-                    //    必须显式要求 ADMIN，否则任何登录用户都能提权/降权
+                            .check(r -> StpUtil.checkRoleOr(RoleCode.ADMIN.name(), RoleCode.ROOT.name()));
+                    // 3) 用户管理接口（提权/降权、封号/解封）：仅 ROOT（优化 2.2 三档权限，
+                    //    admin 不得提权/降权，避免权限链自我放大）
                     SaRouter.match("/api/auth/users/**")
-                            .check(r -> StpUtil.checkRole(RoleCode.ADMIN.name()));
+                            .check(r -> StpUtil.checkRole(RoleCode.ROOT.name()));
                 }))
                 .addPathPatterns("/**")
                 .order(0);
