@@ -4,7 +4,6 @@ import com.anfioo.howtocook.app.dto.MemoryTurn;
 import com.anfioo.howtocook.app.dto.MessageResponse;
 import com.anfioo.howtocook.common.entity.chat.Conversation;
 import com.anfioo.howtocook.common.entity.chat.Message;
-import com.anfioo.howtocook.common.enums.chat.MessageRole;
 import com.anfioo.howtocook.common.enums.chat.MessageType;
 import com.anfioo.howtocook.common.mapper.chat.ConversationMapper;
 import com.anfioo.howtocook.common.mapper.chat.MessageMapper;
@@ -17,6 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,7 +24,7 @@ import java.util.List;
 import static java.util.Collections.reverse;
 
 /**
- * 会话服务：会话 CRUD（归属校验）+ 历史消息查询 + 消息落库（供对话链路与 ChatMemory 复用）。
+ * 会话服务：会话 CRUD（归属校验）+ 历史消息查询 + 消息落库（供对话链路与 AgentHistoryAdvisor 复用）。
  */
 @Slf4j
 @Service
@@ -89,10 +89,12 @@ public class ConversationService {
         return result;
     }
 
-    /** 删除会话（逻辑删） */
+    /** 删除会话（逻辑删会话 + 物理删其全部消息；会话无回收站概念，消息一并清理） */
+    @Transactional
     public void delete(long conversationId, long userId) {
         getOwned(conversationId, userId);
         conversationMapper.deleteById(conversationId);
+        clearMessages(conversationId);
     }
 
     /**
@@ -126,7 +128,7 @@ public class ConversationService {
 
     /**
      * 读取最近 limit 条可注入上下文的消息（USER_MESSAGE / FINAL_ANSWER，时间正序）。
-     * <p>供 DbChatMemory 使用——实体与 Spring AI 的 Message 同简单名，此处封装避免歧义（Step 4.1）。</p>
+     * <p>供 AgentHistoryAdvisor 使用——实体与 Spring AI 的 Message 同简单名，此处封装避免歧义（Step 4.1）。</p>
      */
     public List<MemoryTurn> recentTurns(long conversationId, int limit) {
         if (limit <= 0) {
@@ -148,14 +150,7 @@ public class ConversationService {
         return turns;
     }
 
-    /** 追加一轮上下文消息（type 取 MessageType.USER_MESSAGE / FINAL_ANSWER；供 DbChatMemory 写入） */
-    public Long appendTurn(long conversationId, String messageType, String content) {
-        String role = MessageType.USER_MESSAGE.name().equals(messageType)
-                ? MessageRole.USER.name() : MessageRole.ASSISTANT.name();
-        return appendMessage(conversationId, role, messageType, content, null, null, null);
-    }
-
-    /** 清空会话全部消息（物理删；供 DbChatMemory.clear） */
+    /** 清空会话全部消息（物理删；供会话删除级联调用，message 表无逻辑删字段） */
     public void clearMessages(long conversationId) {
         messageMapper.delete(new LambdaQueryWrapper<Message>()
                 .eq(Message::getConversationId, conversationId));
