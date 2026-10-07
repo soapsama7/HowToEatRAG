@@ -1,19 +1,16 @@
 package com.anfioo.howtocook.app.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.anfioo.howtocook.app.dto.AgentEvent;
+import com.anfioo.howtocook.app.agent.AgentService;
 import com.anfioo.howtocook.app.dto.ChatRequest;
 import com.anfioo.howtocook.app.dto.ConversationResponse;
 import com.anfioo.howtocook.app.dto.MessageResponse;
-import com.anfioo.howtocook.app.agent.AgentService;
 import com.anfioo.howtocook.app.service.ConversationService;
-import com.anfioo.howtocook.app.service.RateLimitService;
 import com.anfioo.howtocook.common.entity.chat.Conversation;
 import com.anfioo.howtocook.common.result.Result;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,36 +22,18 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import reactor.core.Disposable;
-import reactor.core.publisher.Flux;
 
 /**
  * 会话接口（/api/conversations，要求登录）。
- * <p>SSE 对话端点按 §5.6 契约输出事件流：AGENT_START / TOOL_START / TOOL_RESULT /
- * REFERENCE / ANSWER_DELTA / DONE / ERROR，含心跳与断连中止。</p>
+ * <p>SSE 对话端点委托 {@link AgentService#askSse}：限流闸门 / SseEmitter / 心跳 / Flux 桥接
+ * 均已下沉到 Service，Controller 只做参数校验与委托（优化 2.3）。</p>
  */
-@Slf4j
 @RestController
 @RequiredArgsConstructor
 public class ConversationController {
 
     private final ConversationService conversationService;
     private final AgentService agentService;
-    private final RateLimitService rateLimitService;
-
-    /** SSE 心跳线程（每 15s 一条注释帧，防止代理/网关空闲断连） */
-    private final ScheduledExecutorService heartbeatExecutor =
-            Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "sse-heartbeat");
-                t.setDaemon(true);
-                return t;
-            });
 
     /** 新建会话（body 可空，title 可选） */
     @PostMapping("/api/conversations")
@@ -86,68 +65,10 @@ public class ConversationController {
         return Result.ok();
     }
 
-    /** SSE 对话（§5.6 事件契约；入口限流：频次 + 并发，超限 429 统一错误体） */
+    /** SSE 对话（§5.6 事件契约；限流 / 心跳 / 桥接已下沉到 AgentService.askSse） */
     @PostMapping(value = "/api/conversations/{id}/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chat(@PathVariable long id, @Valid @RequestBody ChatRequest request) {
-        long userId = StpUtil.getLoginIdAsLong();
-        rateLimitService.acquireChatSlot(userId); // 频次 + 并发闸门（超限 429）
-        SseEmitter emitter = new SseEmitter(300_000L);
-        AtomicBoolean disconnected = new AtomicBoolean(false);
-
-        emitter.onTimeout(() -> disconnected.set(true));
-        emitter.onError(t -> disconnected.set(true));
-
-        // 心跳：注释帧不计入事件流
-        ScheduledFuture<?> heartbeat = heartbeatExecutor.scheduleAtFixedRate(() -> {
-            if (disconnected.get()) {
-                return;
-            }
-            try {
-                emitter.send(SseEmitter.event().comment("ping"));
-            } catch (Exception e) {
-                disconnected.set(true);
-            }
-        }, 15, 15, TimeUnit.SECONDS);
-
-        Flux<AgentEvent> events = agentService.askStream(id, userId, request.getQuestion());
-        Disposable subscription = events.subscribe(event -> {
-            if (disconnected.get()) {
-                return;
-            }
-            try {
-                emitter.send(SseEmitter.event().name(event.getType())
-                        .data(event.getData(), MediaType.APPLICATION_JSON));
-                if ("DONE".equals(event.getType()) || "ERROR".equals(event.getType())) {
-                    heartbeat.cancel(false);
-                    emitter.complete();
-                }
-            } catch (Exception e) {
-                disconnected.set(true);
-            }
-        }, error -> {
-            heartbeat.cancel(false);
-            try {
-                emitter.send(SseEmitter.event().name("ERROR").data(Map.of(
-                        "code", 50000, "message", "服务器内部错误"),
-                        MediaType.APPLICATION_JSON));
-                emitter.complete();
-            } catch (Exception ignored) {
-                log.debug("SSE 发送失败（客户端已断开）");
-            }
-        }, () -> {
-            heartbeat.cancel(false);
-            emitter.complete();
-        });
-
-        // 会话终结（正常结束/客户端断开/超时）：停止心跳、中止模型生成、释放限流槽位
-        emitter.onCompletion(() -> {
-            heartbeat.cancel(false);
-            if (subscription != null && !subscription.isDisposed()) {
-                subscription.dispose();
-            }
-            rateLimitService.releaseSlot(userId);
-        });
-        return emitter;
+        return agentService.askSse(id, StpUtil.getLoginIdAsLong(), request.getQuestion());
     }
 
     private ConversationResponse toResponse(Conversation conversation) {

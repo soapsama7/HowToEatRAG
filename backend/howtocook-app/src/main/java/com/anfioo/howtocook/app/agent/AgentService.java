@@ -6,11 +6,13 @@ import com.anfioo.howtocook.app.dto.ReferenceView;
 import com.anfioo.howtocook.app.service.ConversationService;
 import com.anfioo.howtocook.app.service.McpClientSupport;
 import com.anfioo.howtocook.app.service.PreferenceService;
+import com.anfioo.howtocook.app.service.RateLimitService;
 import com.anfioo.howtocook.common.constant.AgentPrompts;
 import com.anfioo.howtocook.common.enums.chat.MessageType;
 import com.anfioo.howtocook.common.enums.chat.MessageRole;
 import com.anfioo.howtocook.common.result.ErrorCode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -19,7 +21,9 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
@@ -29,6 +33,11 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -53,20 +62,37 @@ public class AgentService {
     private final ConversationService conversationService;
     private final PreferenceService preferenceService;
     private final McpClientSupport mcpClientSupport;
+    private final RateLimitService rateLimitService;
     private final ObjectMapper objectMapper;
+
+    /** SSE 心跳线程（每 15s 一条注释帧，防止代理/网关空闲断连） */
+    private final ScheduledExecutorService heartbeatExecutor =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "sse-heartbeat");
+                t.setDaemon(true);
+                return t;
+            });
 
     public AgentService(ChatClient.Builder chatClientBuilder,
                         ToolCallbackProvider toolCallbackProvider,
                         ConversationService conversationService,
                         PreferenceService preferenceService,
                         McpClientSupport mcpClientSupport,
+                        RateLimitService rateLimitService,
                         ObjectMapper objectMapper) {
         this.chatClient = chatClientBuilder.build();
         this.toolCallbackProvider = toolCallbackProvider;
         this.conversationService = conversationService;
         this.preferenceService = preferenceService;
         this.mcpClientSupport = mcpClientSupport;
+        this.rateLimitService = rateLimitService;
         this.objectMapper = objectMapper;
+    }
+
+    /** 应用关闭时停掉心跳线程池 */
+    @PreDestroy
+    public void shutdown() {
+        heartbeatExecutor.shutdownNow();
     }
 
     /**
@@ -150,6 +176,72 @@ public class AgentService {
             // 客户端断开 → 中止模型生成
             sink.onCancel(disposable::dispose);
         }, FluxSink.OverflowStrategy.BUFFER);
+    }
+
+    /**
+     * SSE 对话入口（Step 4.3 / 优化 2.3）：限流闸门 + SseEmitter + 心跳 + Flux 桥接下沉到此，
+     * Controller 只做参数校验与委托。事件契约（AGENT_START/TOOL_START/TOOL_RESULT/ANSWER_DELTA/REFERENCE/DONE/ERROR）
+     * 由 {@link #askStream} 产出，本方法仅负责传输层编排。
+     */
+    public SseEmitter askSse(long conversationId, long userId, String question) {
+        rateLimitService.acquireChatSlot(userId); // 频次 + 并发闸门（超限 429）
+        SseEmitter emitter = new SseEmitter(300_000L);
+        AtomicBoolean disconnected = new AtomicBoolean(false);
+
+        emitter.onTimeout(() -> disconnected.set(true));
+        emitter.onError(t -> disconnected.set(true));
+
+        // 心跳：注释帧不计入事件流
+        ScheduledFuture<?> heartbeat = heartbeatExecutor.scheduleAtFixedRate(() -> {
+            if (disconnected.get()) {
+                return;
+            }
+            try {
+                emitter.send(SseEmitter.event().comment("ping"));
+            } catch (Exception e) {
+                disconnected.set(true);
+            }
+        }, 15, 15, TimeUnit.SECONDS);
+
+        Flux<AgentEvent> events = askStream(conversationId, userId, question);
+        Disposable subscription = events.subscribe(event -> {
+            if (disconnected.get()) {
+                return;
+            }
+            try {
+                emitter.send(SseEmitter.event().name(event.getType())
+                        .data(event.getData(), MediaType.APPLICATION_JSON));
+                if ("DONE".equals(event.getType()) || "ERROR".equals(event.getType())) {
+                    heartbeat.cancel(false);
+                    emitter.complete();
+                }
+            } catch (Exception e) {
+                disconnected.set(true);
+            }
+        }, error -> {
+            heartbeat.cancel(false);
+            try {
+                emitter.send(SseEmitter.event().name("ERROR").data(Map.of(
+                        "code", 50000, "message", "服务器内部错误"),
+                        MediaType.APPLICATION_JSON));
+                emitter.complete();
+            } catch (Exception ignored) {
+                log.debug("SSE 发送失败（客户端已断开）");
+            }
+        }, () -> {
+            heartbeat.cancel(false);
+            emitter.complete();
+        });
+
+        // 会话终结（正常结束/客户端断开/超时）：停止心跳、中止模型生成、释放限流槽位
+        emitter.onCompletion(() -> {
+            heartbeat.cancel(false);
+            if (subscription != null && !subscription.isDisposed()) {
+                subscription.dispose();
+            }
+            rateLimitService.releaseSlot(userId);
+        });
+        return emitter;
     }
 
     /** 对话前公共装配：归属校验 / MCP 补连 / 历史 / 工具包装 / Prompt / USER 消息落库 */
