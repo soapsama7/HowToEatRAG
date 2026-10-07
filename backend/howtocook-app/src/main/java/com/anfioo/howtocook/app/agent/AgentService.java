@@ -2,6 +2,7 @@ package com.anfioo.howtocook.app.agent;
 
 import com.anfioo.howtocook.app.dto.AgentEvent;
 import com.anfioo.howtocook.app.dto.ReferenceView;
+import com.anfioo.howtocook.app.service.AgentRunLogService;
 import com.anfioo.howtocook.app.service.ConversationService;
 import com.anfioo.howtocook.app.service.McpClientSupport;
 import com.anfioo.howtocook.app.service.PreferenceService;
@@ -58,6 +59,7 @@ public class AgentService {
     private final PreferenceService preferenceService;
     private final McpClientSupport mcpClientSupport;
     private final RateLimitService rateLimitService;
+    private final AgentRunLogService agentRunLogService;
     private final ObjectMapper objectMapper;
 
     /** SSE 心跳线程（每 15s 一条注释帧，防止代理/网关空闲断连） */
@@ -74,6 +76,7 @@ public class AgentService {
                         PreferenceService preferenceService,
                         McpClientSupport mcpClientSupport,
                         RateLimitService rateLimitService,
+                        AgentRunLogService agentRunLogService,
                         ObjectMapper objectMapper) {
         this.chatClient = chatClientBuilder.build();
         this.toolCallbackProvider = toolCallbackProvider;
@@ -81,6 +84,7 @@ public class AgentService {
         this.preferenceService = preferenceService;
         this.mcpClientSupport = mcpClientSupport;
         this.rateLimitService = rateLimitService;
+        this.agentRunLogService = agentRunLogService;
         this.objectMapper = objectMapper;
     }
 
@@ -126,6 +130,13 @@ public class AgentService {
                     data.put("elapsedMs", entry.get("elapsedMs"));
                 }
                 sink.next(AgentEvent.of(event, data));
+                // 记录到 agent_run_log（优化 2.8）：工具事件实时落库
+                Long elapsedMs = entry.get("elapsedMs") == null ? null
+                        : ((Number) entry.get("elapsedMs")).longValue();
+                agentRunLogService.record(conversationId, userId, event,
+                        String.valueOf(entry.get("tool")), elapsedMs,
+                        (Boolean) entry.get("ok"),
+                        entry.get("summary") == null ? null : String.valueOf(entry.get("summary")));
                 // 工具返回后重置内容段：最终答案 = 最后一次工具调用之后的内容
                 if ("TOOL_RESULT".equals(event)) {
                     finalAnswer.set(currentSegment.toString());
@@ -156,12 +167,18 @@ public class AgentService {
                     }, error -> {
                         log.error("Agent 流式调用失败: conversationId={}, error={}",
                                 conversationId, error.getMessage(), error);
+                        // 出错也落库（优化 2.8：补观测盲区，特别记录出错部分）
+                        agentRunLogService.record(conversationId, userId, "ERROR", null, null,
+                                false, error.getMessage());
                         sink.next(AgentEvent.of("ERROR", Map.of(
                                 "code", ErrorCode.SERVICE_UNAVAILABLE.getCode(),
                                 "message", "对话服务暂时不可用，请稍后再试")));
                         sink.complete();
                     }, () -> {
                         finalAnswer.set(currentSegment.toString());
+                        // 记录最终回答到 agent_run_log（优化 2.8）
+                        agentRunLogService.record(conversationId, userId, "ANSWER", null, null,
+                                true, finalAnswer.get());
                         // 最终回答 + trace/references 落库
                         Long messageId = conversationService.appendMessage(conversationId,
                                 MessageRole.ASSISTANT.name(), MessageType.FINAL_ANSWER.name(),

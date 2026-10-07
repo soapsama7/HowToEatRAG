@@ -2,6 +2,7 @@ package com.anfioo.howtocook.app.controller;
 
 import com.anfioo.howtocook.app.aspect.AuditOperation;
 import com.anfioo.howtocook.app.service.AdminOpsService;
+import com.anfioo.howtocook.common.entity.sys.AgentRunLog;
 import com.anfioo.howtocook.common.entity.sys.AuditLog;
 import com.anfioo.howtocook.common.entity.sys.IndexTask;
 import com.anfioo.howtocook.common.result.Result;
@@ -45,5 +46,13 @@ public class AdminOpsController {
                                             @RequestParam(defaultValue = "20") long pageSize,
                                             @RequestParam(required = false) String operation) {
         return Result.ok(adminOpsService.listAuditLogs(pageNum, pageSize, operation));
+    }
+
+    /** Agent 行为日志分页（仅 ROOT；与审计日志区分，按会话隔离） */
+    @GetMapping("/agent-run-logs")
+    public Result<Page<AgentRunLog>> agentRunLogs(@RequestParam(defaultValue = "1") long pageNum,
+                                                  @RequestParam(defaultValue = "20") long pageSize,
+                                                  @RequestParam(required = false) Long conversationId) {
+        return Result.ok(adminOpsService.listAgentRunLogs(pageNum, pageSize, conversationId));
     }
 }

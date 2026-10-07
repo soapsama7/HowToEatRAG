@@ -1,9 +1,11 @@
 package com.anfioo.howtocook.app.service;
 
 import com.anfioo.howtocook.app.mq.DocumentIndexProducer;
+import com.anfioo.howtocook.common.entity.sys.AgentRunLog;
 import com.anfioo.howtocook.common.entity.sys.AuditLog;
 import com.anfioo.howtocook.common.entity.sys.IndexTask;
 import com.anfioo.howtocook.common.enums.sys.IndexTaskStatus;
+import com.anfioo.howtocook.common.mapper.sys.AgentRunLogMapper;
 import com.anfioo.howtocook.common.mapper.sys.AuditLogMapper;
 import com.anfioo.howtocook.common.mapper.sys.IndexTaskMapper;
 import com.anfioo.howtocook.common.result.BusinessException;
@@ -24,6 +26,7 @@ public class AdminOpsService {
 
     private final IndexTaskMapper indexTaskMapper;
     private final AuditLogMapper auditLogMapper;
+    private final AgentRunLogMapper agentRunLogMapper;
     private final DocumentIndexProducer documentIndexProducer;
 
     /** 索引任务分页（可按状态筛选，更新时间倒序） */
@@ -67,5 +70,16 @@ public class AdminOpsService {
             wrapper.eq(AuditLog::getOperation, operation);
         }
         return auditLogMapper.selectPage(page, wrapper);
+    }
+
+    /** Agent 行为日志分页（时间倒序；conversationId 可选筛选，按会话隔离） */
+    public Page<AgentRunLog> listAgentRunLogs(long pageNum, long pageSize, Long conversationId) {
+        Page<AgentRunLog> page = new Page<>(pageNum, pageSize);
+        LambdaQueryWrapper<AgentRunLog> wrapper = new LambdaQueryWrapper<AgentRunLog>()
+                .orderByDesc(AgentRunLog::getId);
+        if (conversationId != null) {
+            wrapper.eq(AgentRunLog::getConversationId, conversationId);
+        }
+        return agentRunLogMapper.selectPage(page, wrapper);
     }
 }
