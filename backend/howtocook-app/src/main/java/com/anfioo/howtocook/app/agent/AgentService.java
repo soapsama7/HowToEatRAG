@@ -1,7 +1,6 @@
 package com.anfioo.howtocook.app.agent;
 
 import com.anfioo.howtocook.app.dto.AgentEvent;
-import com.anfioo.howtocook.app.dto.MemoryTurn;
 import com.anfioo.howtocook.app.dto.ReferenceView;
 import com.anfioo.howtocook.app.service.ConversationService;
 import com.anfioo.howtocook.app.service.McpClientSupport;
@@ -15,9 +14,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,7 +24,6 @@ import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,7 +40,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * <ul>
  *   <li>System Prompt：AgentPrompts 模板 + 用户偏好注入；</li>
  *   <li>工具：MCP search_chunks / get_recipe_detail（经 TracedToolCallback 包装，收集 trace/引用并强制轮数/超时约束）；</li>
- *   <li>记忆：DbChatMemory 读取最近 memory-window 条历史注入上下文（仅 USER_MESSAGE / FINAL_ANSWER）；</li>
+ *   <li>记忆：AgentHistoryAdvisor 在 before 阶段读取最近 memory-window 条历史注入上下文（仅 USER_MESSAGE / FINAL_ANSWER）；</li>
  *   <li>落库：USER 消息与 ASSISTANT(FINAL_ANSWER) 消息由本服务持久化，trace/references 随 ASSISTANT 消息保存。</li>
  * </ul>
  */
@@ -101,13 +96,27 @@ public class AgentService {
      * 内容段"（模型在工具调用前可能输出的引导语计入流但不作为最终答案落库）。</p>
      */
     public Flux<AgentEvent> askStream(long conversationId, long userId, String question) {
-        AgentSetup setup = prepare(conversationId, userId, question);
+        // 准备阶段（eager，先于 Flux 订阅）：归属校验 / MCP 补连 / 工具包装 / Prompt / USER 消息落库
+        conversationService.getOwned(conversationId, userId);
+        mcpClientSupport.ensureInitialized();
+        AgentRunContext context = new AgentRunContext();
+        ToolCallback[] tools = Arrays.stream(toolCallbackProvider.getToolCallbacks())
+                .map(cb -> (ToolCallback) new TracedToolCallback(cb, context, objectMapper))
+                .toArray(ToolCallback[]::new);
+        String systemPrompt = String.format(AgentPrompts.SYSTEM_PROMPT_TEMPLATE,
+                preferenceService.loadAsPromptText(userId));
+        conversationService.appendMessage(conversationId, MessageRole.USER.name(),
+                MessageType.USER_MESSAGE.name(), question, null, null, null);
+        conversationService.updateTitleIfDefault(conversationId, question);
+        // 历史注入交给 AgentHistoryAdvisor（before 阶段），不在本方法手动 buildHistory
+        AgentHistoryAdvisor historyAdvisor = new AgentHistoryAdvisor(conversationService, memoryWindow, conversationId);
+
         StringBuilder currentSegment = new StringBuilder();
         AtomicReference<String> finalAnswer = new AtomicReference<>("");
 
         return Flux.create(sink -> {
             // 工具实时事件：TOOL_START / TOOL_RESULT
-            setup.context().setTraceListener(entry -> {
+            context.setTraceListener(entry -> {
                 String event = String.valueOf(entry.get("event"));
                 Map<String, Object> data = new LinkedHashMap<>();
                 data.put("toolName", entry.get("tool"));
@@ -128,10 +137,10 @@ public class AgentService {
                     Map.of("conversationId", conversationId)));
 
             Disposable disposable = chatClient.prompt()
-                    .system(setup.systemPrompt())
-                    .messages(setup.history())
+                    .system(systemPrompt)
                     .user(question)
-                    .toolCallbacks(setup.tools())
+                    .advisors(historyAdvisor)
+                    .toolCallbacks(tools)
                     .stream()
                     .chatResponse()
                     .subscribe(response -> {
@@ -157,10 +166,10 @@ public class AgentService {
                         Long messageId = conversationService.appendMessage(conversationId,
                                 MessageRole.ASSISTANT.name(), MessageType.FINAL_ANSWER.name(),
                                 finalAnswer.get(), null,
-                                toJson(setup.context().getReferences()),
-                                toJson(setup.context().getTrace()));
+                                toJson(context.getReferences()),
+                                toJson(context.getTrace()));
                         // REFERENCE：DTO 层过滤 score/retrievalType
-                        List<ReferenceView> refs = setup.context().getReferences().stream()
+                        List<ReferenceView> refs = context.getReferences().stream()
                                 .map(r -> ReferenceView.builder()
                                         .docId((Long) r.get("docId"))
                                         .title((String) r.get("title"))
@@ -242,43 +251,6 @@ public class AgentService {
             rateLimitService.releaseSlot(userId);
         });
         return emitter;
-    }
-
-    /** 对话前公共装配：归属校验 / MCP 补连 / 历史 / 工具包装 / Prompt / USER 消息落库 */
-    private AgentSetup prepare(long conversationId, long userId, String question) {
-        conversationService.getOwned(conversationId, userId);
-        mcpClientSupport.ensureInitialized();
-
-        List<Message> history = buildHistory(conversationId);
-        AgentRunContext context = new AgentRunContext();
-        ToolCallback[] tools = Arrays.stream(toolCallbackProvider.getToolCallbacks())
-                .map(cb -> (ToolCallback) new TracedToolCallback(cb, context, objectMapper))
-                .toArray(ToolCallback[]::new);
-        String systemPrompt = String.format(AgentPrompts.SYSTEM_PROMPT_TEMPLATE,
-                preferenceService.loadAsPromptText(userId));
-        conversationService.appendMessage(conversationId, MessageRole.USER.name(),
-                MessageType.USER_MESSAGE.name(), question, null, null, null);
-        conversationService.updateTitleIfDefault(conversationId, question);
-        return new AgentSetup(history, tools, systemPrompt, context);
-    }
-
-    /** 装配产物（历史 / 已包装工具 / System Prompt / 运行上下文） */
-    private record AgentSetup(List<Message> history, ToolCallback[] tools,
-                              String systemPrompt, AgentRunContext context) {
-    }
-
-    /** 由持久化消息构造 Spring AI 历史消息（仅 USER_MESSAGE / FINAL_ANSWER） */
-    private List<Message> buildHistory(long conversationId) {
-        List<MemoryTurn> turns = conversationService.recentTurns(conversationId, memoryWindow);
-        List<Message> history = new ArrayList<>(turns.size());
-        for (MemoryTurn turn : turns) {
-            if (MessageType.USER_MESSAGE.name().equals(turn.getMessageType())) {
-                history.add(new UserMessage(turn.getContent()));
-            } else {
-                history.add(new AssistantMessage(turn.getContent()));
-            }
-        }
-        return history;
     }
 
     private String toJson(Object value) {
