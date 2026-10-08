@@ -29,6 +29,9 @@ public class AuditLog {
     /** 操作名，如 UPLOAD_DOCUMENT */
     private String operation;
 
+    /** 审计类别：DOC（文档/索引管理）/ USER（用户管理） */
+    private String category;
+
     /** 请求方法与路径 */
     private String method;
 

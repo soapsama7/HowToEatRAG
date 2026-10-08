@@ -15,4 +15,7 @@ public @interface AuditOperation {
 
     /** 操作名（如 UPLOAD_DOCUMENT / DELETE_DOCUMENT），审计记录的业务标识 */
     String operation();
+
+    /** 审计类别：DOC（文档/索引管理，默认）/ USER（用户管理，如提权/降权/封号/解封） */
+    String category() default "DOC";
 }

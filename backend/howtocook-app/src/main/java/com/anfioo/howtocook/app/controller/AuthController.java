@@ -55,7 +55,7 @@ public class AuthController {
     }
 
     /** 提升用户为管理员（仅 ROOT；不可操作自己） */
-    @AuditOperation(operation = "GRANT_ADMIN")
+    @AuditOperation(operation = "GRANT_ADMIN", category = "USER")
     @PostMapping("/users/{userId}/role")
     public Result<Void> grantAdmin(@PathVariable long userId) {
         authService.grantAdmin(userId);
@@ -63,7 +63,7 @@ public class AuthController {
     }
 
     /** 降级用户为普通用户（仅 ROOT；不可操作自己） */
-    @AuditOperation(operation = "REVOKE_ADMIN")
+    @AuditOperation(operation = "REVOKE_ADMIN", category = "USER")
     @DeleteMapping("/users/{userId}/role")
     public Result<Void> revokeAdmin(@PathVariable long userId) {
         authService.revokeAdmin(userId);
@@ -71,7 +71,7 @@ public class AuthController {
     }
 
     /** 封禁用户（仅 ROOT） */
-    @AuditOperation(operation = "BAN_USER")
+    @AuditOperation(operation = "BAN_USER", category = "USER")
     @PostMapping("/users/{userId}/ban")
     public Result<Void> banUser(@PathVariable long userId) {
         authService.banUser(userId);
@@ -79,7 +79,7 @@ public class AuthController {
     }
 
     /** 解封用户（仅 ROOT） */
-    @AuditOperation(operation = "UNBAN_USER")
+    @AuditOperation(operation = "UNBAN_USER", category = "USER")
     @DeleteMapping("/users/{userId}/ban")
     public Result<Void> unbanUser(@PathVariable long userId) {
         authService.unbanUser(userId);

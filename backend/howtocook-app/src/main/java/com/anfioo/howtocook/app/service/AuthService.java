@@ -136,10 +136,10 @@ public class AuthService {
      */
     public void revokeAdmin(long targetUserId) {
         requireManageable(targetUserId);
-        Role adminRole = requireRole(RoleCode.ADMIN.name());
         if (!hasRole(targetUserId, RoleCode.ADMIN.name())) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "该用户不是管理员");
         }
+        Role adminRole = requireRole(RoleCode.ADMIN.name());
         userRoleMapper.delete(new LambdaQueryWrapper<UserRole>()
                 .eq(UserRole::getUserId, targetUserId)
                 .eq(UserRole::getRoleId, adminRole.getId()));

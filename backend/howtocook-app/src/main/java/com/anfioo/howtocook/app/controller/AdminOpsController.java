@@ -40,12 +40,13 @@ public class AdminOpsController {
         return Result.ok(adminOpsService.retryIndexTask(taskNo));
     }
 
-    /** 审计日志分页查询 */
+    /** 审计日志分页查询（可按类别 DOC / USER 区分） */
     @GetMapping("/audit-logs")
     public Result<Page<AuditLog>> auditLogs(@RequestParam(defaultValue = "1") long pageNum,
                                             @RequestParam(defaultValue = "20") long pageSize,
-                                            @RequestParam(required = false) String operation) {
-        return Result.ok(adminOpsService.listAuditLogs(pageNum, pageSize, operation));
+                                            @RequestParam(required = false) String operation,
+                                            @RequestParam(required = false) String category) {
+        return Result.ok(adminOpsService.listAuditLogs(pageNum, pageSize, operation, category));
     }
 
     /** Agent 行为日志分页（仅 ROOT；与审计日志区分，按会话隔离） */

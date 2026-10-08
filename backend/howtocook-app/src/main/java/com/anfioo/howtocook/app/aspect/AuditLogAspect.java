@@ -33,20 +33,24 @@ public class AuditLogAspect {
         long start = System.currentTimeMillis();
         try {
             Object result = joinPoint.proceed();
-            record(auditOperation.operation(), joinPoint, "SUCCESS", System.currentTimeMillis() - start);
+            record(auditOperation.operation(), auditOperation.category(), joinPoint, "SUCCESS",
+                    System.currentTimeMillis() - start);
             return result;
         } catch (Throwable e) {
-            record(auditOperation.operation(), joinPoint, "FAIL", System.currentTimeMillis() - start);
+            record(auditOperation.operation(), auditOperation.category(), joinPoint, "FAIL",
+                    System.currentTimeMillis() - start);
             throw e;
         }
     }
 
-    private void record(String operation, ProceedingJoinPoint joinPoint, String result, long costMs) {
+    private void record(String operation, String category, ProceedingJoinPoint joinPoint,
+                        String result, long costMs) {
         try {
             HttpServletRequest request = currentRequest();
 
             AuditLog auditLog = new AuditLog();
             auditLog.setOperation(operation);
+            auditLog.setCategory(category);
             auditLog.setMethod(request == null ? null
                     : request.getMethod() + " " + request.getRequestURI());
             auditLog.setParams(auditLogService.maskSensitive(

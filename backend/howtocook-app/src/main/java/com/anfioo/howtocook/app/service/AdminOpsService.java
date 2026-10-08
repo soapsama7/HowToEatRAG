@@ -61,13 +61,16 @@ public class AdminOpsService {
         return task;
     }
 
-    /** 审计日志分页（时间倒序；operation 可选筛选） */
-    public Page<AuditLog> listAuditLogs(long pageNum, long pageSize, String operation) {
+    /** 审计日志分页（时间倒序；operation / category 可选筛选，category：DOC / USER） */
+    public Page<AuditLog> listAuditLogs(long pageNum, long pageSize, String operation, String category) {
         Page<AuditLog> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<AuditLog> wrapper = new LambdaQueryWrapper<AuditLog>()
                 .orderByDesc(AuditLog::getId);
         if (operation != null && !operation.isBlank()) {
             wrapper.eq(AuditLog::getOperation, operation);
+        }
+        if (category != null && !category.isBlank()) {
+            wrapper.eq(AuditLog::getCategory, category);
         }
         return auditLogMapper.selectPage(page, wrapper);
     }
