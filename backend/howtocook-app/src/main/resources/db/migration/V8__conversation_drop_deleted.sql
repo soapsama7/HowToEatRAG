@@ -4,4 +4,4 @@
 -- 直接删掉 deleted 列，conversation 删除走物理删。
 -- =====================================================================
 
-ALTER TABLE conversation DROP COLUMN deleted;
+ALTER TABLE conversation DROP COLUMN IF EXISTS deleted;
