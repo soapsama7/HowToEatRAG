@@ -59,17 +59,22 @@ public class DocumentAdminService {
     @Transactional
     public DocumentUploadResponse upload(MultipartFile file, String docType, String category) {
         validateUpload(file);
-        if (docType != null && !DocType.RECIPE.name().equals(docType)
-                && !DocType.TIP.name().equals(docType) && !DocType.OTHER.name().equals(docType)) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "docType 仅允许 RECIPE/TIP/OTHER");
-        }
-
         byte[] bytes;
         try {
             bytes = file.getBytes();
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "读取上传文件失败");
         }
+        String title = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().replaceAll("(?i)\\.md$", "");
+        return createDocument(bytes, title, docType, category, StpUtil.getLoginIdAsLong());
+    }
+
+    /**
+     * 从原始内容创建文档（上传 / 提交审核通过共用，优化 B2）：查重 → 存 RustFS → 建 document + index_task → 投递。
+     * <p>无事务注解：由调用方（upload / approve）提供事务边界。</p>
+     */
+    public DocumentUploadResponse createDocument(byte[] bytes, String title, String docType, String category, Long uploaderId) {
+        validateDocType(docType);
 
         // 内容哈希查重（R3 返工）：手写 SQL 绕过 @TableLogic，回收站文档同样拦截
         String contentHash = DigestUtil.sha256Hex(bytes);
@@ -87,14 +92,14 @@ public class DocumentAdminService {
         storageService.putObject(new ByteArrayInputStream(bytes), objectKey);
 
         Document document = new Document();
-        document.setTitle(file.getOriginalFilename().replaceAll("(?i)\\.md$", ""));
+        document.setTitle(title);
         document.setDocType(docType == null ? DocType.OTHER.name() : docType);
         document.setCategory(category);
         document.setObjectKey(objectKey);
         document.setFileSize((long) bytes.length);
         document.setContentHash(contentHash);
         document.setStatus(DocStatus.PENDING.name());
-        document.setUploaderId(StpUtil.getLoginIdAsLong());
+        document.setUploaderId(uploaderId);
         try {
             documentMapper.insert(document);
         } catch (Exception e) {
@@ -117,6 +122,14 @@ public class DocumentAdminService {
                 .docId(document.getId())
                 .taskNo(taskNo)
                 .build();
+    }
+
+    /** 校验文档类型（RECIPE/TIP/OTHER） */
+    private void validateDocType(String docType) {
+        if (docType != null && !DocType.RECIPE.name().equals(docType)
+                && !DocType.TIP.name().equals(docType) && !DocType.OTHER.name().equals(docType)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "docType 仅允许 RECIPE/TIP/OTHER");
+        }
     }
 
     /** 分页列表（状态筛选，逻辑删除自动过滤） */
