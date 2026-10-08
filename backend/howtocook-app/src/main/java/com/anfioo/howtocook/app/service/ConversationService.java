@@ -89,12 +89,12 @@ public class ConversationService {
         return result;
     }
 
-    /** 删除会话（逻辑删会话 + 物理删其全部消息；会话无回收站概念，消息一并清理） */
+    /** 删除会话（物理删：先清其全部消息，再删会话本身；会话与消息均无回收站概念） */
     @Transactional
     public void delete(long conversationId, long userId) {
         getOwned(conversationId, userId);
-        conversationMapper.deleteById(conversationId);
         clearMessages(conversationId);
+        conversationMapper.deleteById(conversationId);
     }
 
     /**
