@@ -44,7 +44,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
                             .check(r -> StpUtil.checkRoleOr(RoleCode.ADMIN.name(), RoleCode.ROOT.name()));
                     // 3) 用户管理接口（提权/降权、封号/解封）：仅 ROOT（优化 2.2 三档权限，
                     //    admin 不得提权/降权，避免权限链自我放大）
-                    SaRouter.match("/api/auth/users/**")
+                    SaRouter.match("/api/auth/users", "/api/auth/users/**")
                             .check(r -> StpUtil.checkRole(RoleCode.ROOT.name()));
                     // 4) Agent 行为日志（优化 2.8）：仅 ROOT 可看（admin 无权；叠加 2) 的 ADMIN/ROOT 规则后仍为 ROOT-only）
                     SaRouter.match("/api/admin/agent-run-logs")

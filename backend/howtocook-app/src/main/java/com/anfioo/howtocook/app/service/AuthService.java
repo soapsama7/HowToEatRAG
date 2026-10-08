@@ -4,6 +4,7 @@ import com.anfioo.howtocook.app.dto.CurrentUserResponse;
 import com.anfioo.howtocook.app.dto.LoginRequest;
 import com.anfioo.howtocook.app.dto.LoginResponse;
 import com.anfioo.howtocook.app.dto.RegisterRequest;
+import com.anfioo.howtocook.app.dto.UserListResponse;
 import com.anfioo.howtocook.common.entity.user.Role;
 import com.anfioo.howtocook.common.entity.user.User;
 import com.anfioo.howtocook.common.entity.user.UserRole;
@@ -15,6 +16,7 @@ import com.anfioo.howtocook.common.result.BusinessException;
 import com.anfioo.howtocook.common.result.ErrorCode;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -115,6 +117,34 @@ public class AuthService {
         return roleMapper.selectBatchIds(roleIds).stream()
                 .map(role -> role.getCode())
                 .toList();
+    }
+
+    /**
+     * 管理端用户列表（仅 ROOT，路由层保证）：分页 + 用户名/昵称关键词 + 状态筛选，附带角色列表。
+     */
+    public Page<UserListResponse> listUsers(long pageNum, long pageSize, String keyword, Integer status) {
+        Page<User> page = new Page<>(pageNum, pageSize);
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<User>()
+                .orderByDesc(User::getId);
+        if (keyword != null && !keyword.isBlank()) {
+            wrapper.and(w -> w.like(User::getUsername, keyword)
+                    .or().like(User::getNickname, keyword));
+        }
+        if (status != null) {
+            wrapper.eq(User::getStatus, status);
+        }
+        Page<User> userPage = userMapper.selectPage(page, wrapper);
+
+        Page<UserListResponse> result = new Page<>(userPage.getCurrent(), userPage.getSize(), userPage.getTotal());
+        result.setRecords(userPage.getRecords().stream().map(u -> UserListResponse.builder()
+                .userId(u.getId())
+                .username(u.getUsername())
+                .nickname(u.getNickname())
+                .status(u.getStatus())
+                .roles(getRoleCodes(u.getId()))
+                .createdAt(u.getCreatedAt())
+                .build()).toList());
+        return result;
     }
 
     /**

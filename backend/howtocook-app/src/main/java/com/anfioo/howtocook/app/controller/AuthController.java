@@ -5,8 +5,10 @@ import com.anfioo.howtocook.app.dto.CurrentUserResponse;
 import com.anfioo.howtocook.app.dto.LoginRequest;
 import com.anfioo.howtocook.app.dto.LoginResponse;
 import com.anfioo.howtocook.app.dto.RegisterRequest;
+import com.anfioo.howtocook.app.dto.UserListResponse;
 import com.anfioo.howtocook.app.service.AuthService;
 import com.anfioo.howtocook.common.result.Result;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -15,6 +17,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -52,6 +55,15 @@ public class AuthController {
     @GetMapping("/me")
     public Result<CurrentUserResponse> me() {
         return Result.ok(authService.currentUser());
+    }
+
+    /** 用户列表（仅 ROOT）：分页 + 关键词/状态筛选，供用户管理界面使用 */
+    @GetMapping("/users")
+    public Result<Page<UserListResponse>> users(@RequestParam(defaultValue = "1") long pageNum,
+                                                @RequestParam(defaultValue = "20") long pageSize,
+                                                @RequestParam(required = false) String keyword,
+                                                @RequestParam(required = false) Integer status) {
+        return Result.ok(authService.listUsers(pageNum, pageSize, keyword, status));
     }
 
     /** 提升用户为管理员（仅 ROOT；不可操作自己） */
